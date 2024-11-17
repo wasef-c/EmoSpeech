@@ -199,180 +199,82 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class ImprovedCombinedModel(nn.Module):
-    def __init__(self, image_model, bert_model_inp, image_feature_dim, bert_embedding_dim, combined_dim, num_labels, dropout_prob=0.5):
-        super(ImprovedCombinedModel, self).__init__()
-        self.image_model = image_model
-        self.bert_model = bert_model_inp
-        global bert_model
-        bert_model = bert_model_inp
-    
+class CrossAttentionLayer(nn.Module):
+    def __init__(self, query_dim, embed_dim, num_heads, dropout_prob=0.1):
+        super(CrossAttentionLayer, self).__init__()
+        self.query_proj = nn.Linear(query_dim, embed_dim)
+        self.key_proj = nn.Linear(embed_dim, embed_dim)
+        self.value_proj = nn.Linear(embed_dim, embed_dim)
 
-        # self.fc = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
-        self.fc = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
-
-        self.classifier = nn.Linear(combined_dim, num_labels)
-        self.img_classifier = nn.Linear(image_feature_dim, num_labels)
-        self.bert_classifier = nn.Linear(bert_embedding_dim, num_labels)
-        
-        self.dropout = nn.Dropout(dropout_prob)
-        self.layer_norm = nn.LayerNorm(combined_dim)
-
-        # Learnable weights for feature scaling
-        self.bert_scale = 2#nn.Parameter(torch.ones(1))
-        self.image_scale = 0.7# nn.Parameter(torch.ones(1))
-
-        self.image_feature_dim = image_feature_dim
-        self.bert_embedding_dim = bert_embedding_dim
-        
-    def forward(self, pixel_values, bert_embeddings, labels=None):
-        # Extract image features
-        pixel_values = pixel_values.to(device)
-
-        image_outputs = self.image_model(pixel_values, output_hidden_states=True)
-
-        image_features = image_outputs.hidden_states[-1]
-
-        # Global average pooling
-        image_features = image_features.mean(dim=(1, 2))
-        # image_features = image_outputs.logits
-        bert_embeddings = bert_embeddings.to(device)
-
-        # Normalize and scale features
-        # bert_embeddings = self.bert_scale * F.layer_norm(bert_embeddings, [self.bert_embedding_dim])
-        # image_features = self.image_scale * F.layer_norm(image_features, [self.image_feature_dim])
-
-        bert_embeddings = self.bert_scale * bert_embeddings
-        image_features = self.image_scale * image_features
-
-        # Concatenate features
-        combined_features = torch.cat([image_features, bert_embeddings], dim=1)
-        # print(f"Image features shape: {image_features.shape}")
-        # print(f"BERT embeddings shape: {bert_embeddings.shape}")
-        # print(f"Image features shape: {image_features.shape}")
-        # print(f"COMBINRF embeddings shape: {combined_features.shape}")
-
-
-        combined_output = self.fc(combined_features)
-
-        combined_features = self.dropout(combined_features)
-
-        # # Pass through fully connected layers with activation
-        # combined_output = F.gelu(self.fc(combined_features))
-        # combined_output = self.layer_norm(combined_output)
-        # combined_output = self.dropout(combined_output)
-
-        logits = self.classifier(combined_output)
-        image_output = self.img_classifier(image_features)
-        bert_output = self.bert_classifier(bert_embeddings)
-
-        return {"logits": logits, "image_logits": image_output, "bert_logits": bert_output}
-
-
-
-class CombinedModel(nn.Module):
-    def __init__(self, image_model, image_feature_dim, bert_embedding_dim, combined_dim, num_labels, dropout_prob=0.5):
-        super(CombinedModel, self).__init__()
-        self.image_model = image_model
-        self.image_feature_dim = image_feature_dim
-        self.bert_embedding_dim = bert_embedding_dim
-
-        # Fix the input dimension to match concatenated features
-        self.fc = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
-        self.classifier = nn.Linear(combined_dim, num_labels)
-        self.img_classifier = nn.Linear(image_feature_dim, num_labels)
-        self.bert_classifier = nn.Linear(bert_embedding_dim, num_labels)
+        self.multihead_attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout_prob,  batch_first=True)
+        self.layer_norm = nn.LayerNorm(embed_dim)
         self.dropout = nn.Dropout(dropout_prob)
 
-        self.bert_scale = nn.Parameter(torch.ones(1))
-        self.image_scale = nn.Parameter(torch.ones(1))
+    def forward(self, query, key, value, attention_mask=None):
+        # Project query, key, and value to the same embedding dimension
+        query = self.query_proj(query)
+        key = self.key_proj(key)
+        value = self.value_proj(value)
+        # Apply multihead attention
+        attn_output, _ = self.multihead_attn(query, key, value, attn_mask=attention_mask)
 
-    def forward(self, pixel_values, bert_embeddings, labels=None):
-
-        # Move inputs to device
-        pixel_values = pixel_values.to(device)
-        bert_embeddings = bert_embeddings.to(device)
-
-        # Extract image features
-        image_outputs = self.image_model(pixel_values, output_hidden_states=True)
-        image_features = image_outputs.hidden_states[-1]
-
-        # Global average pooling
-        image_features = image_features.mean(dim=(1, 2))
-        self.bert_scale = nn.Parameter(torch.tensor(0.5))
-        self.image_scale = nn.Parameter(torch.tensor(0.5))
-
-        # Scale the features
-        scaled_bert_embeddings = self.bert_scale * bert_embeddings
-        scaled_image_features = self.image_scale * image_features
-
-        # Concatenate scaled features
-        combined_features = torch.cat([scaled_image_features, scaled_bert_embeddings], dim=1)
-        combined_output = self.fc(combined_features)
-
-        combined_output = self.dropout(combined_output)
-        logits = self.classifier(combined_output)
-
-        # Concatenate image features with BERT embeddings
-        # # combined_features = torch.cat([image_features, bert_embeddings], dim=1)
-
-        # # Pass through fully connected layers
-        # combined_output = self.fc(combined_features)
-        # logits = self.classifier(combined_output)
-
-        image_output = self.img_classifier(image_features)
-        bert_output = self.bert_classifier(bert_embeddings)
+        # Residual connection and layer normalization
+        output = self.layer_norm(query + self.dropout(attn_output))
+        return output
 
 
-        return {"logits": logits, "image_logits": image_output, "bert_logits":bert_output}
-
-from transformers import BertModel
-
-class CombinedModels(nn.Module):
-    def __init__(self, image_model, image_feature_dim, bert_embedding_dim, combined_dim, num_labels, dropout_prob=0.1):
-        super(CombinedModels, self).__init__()
+class CombinedModelsNew(nn.Module):
+    def __init__(self, image_model, bert_model, image_feature_dim, bert_embedding_dim, combined_dim, num_labels, dropout_prob=0.1):
+        super(CombinedModelsNew, self).__init__()
         self.image_model = image_model
-
-        self.image_feature_dim = image_feature_dim
-        self.bert_embedding_dim = bert_embedding_dim
+        self.bert_model = bert_model
+        self.adaptive_pool = nn.AdaptiveAvgPool2d(1)
 
         self.dropout = nn.Dropout(dropout_prob)
+        self.cross_attention = CrossAttentionLayer(query_dim=image_feature_dim, embed_dim = bert_embedding_dim, num_heads=4, dropout_prob=dropout_prob)
 
 
         # Fully connected layers for combining features
-        self.fc = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
+        # self.fc = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
+        self.fc1 = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
+        self.fc2 = nn.Linear(combined_dim, combined_dim)
+        self.fc3 = nn.Linear(combined_dim, num_labels)
+        
         self.classifier = nn.Linear(combined_dim, num_labels)
-        self.img_classifier = nn.Linear(image_feature_dim, num_labels)
-        self.bert_classifier = nn.Linear(bert_embedding_dim, num_labels)
 
-    def forward(self, pixel_values, bert_embeddings, labels=None):
-        # Extract image features
+    def forward(self, pixel_values, bert_input_ids, bert_attention_mask, labels=None):
         image_outputs = self.image_model(pixel_values, output_hidden_states=True)
         image_features = image_outputs.hidden_states[-1].mean(dim=(1, 2))
 
-        bert_embeddings = bert_embeddings.to(device)
 
 
-        # Concatenate image features and BERT embeddings
-        combined_features = torch.cat([image_features, bert_embeddings], dim=1)
-        # combined_features = self.dropout(combined_features)
+        bert_outputs = self.bert_model(
+            input_ids=bert_input_ids,
+            attention_mask=bert_attention_mask,
+            output_hidden_states=True,
+        )
+        bert_embeddings = bert_outputs.last_hidden_state  # Shape: (batch_size, seq_len, bert_embedding_dim)
+
+        # Prepare image features as queries
+        image_features = image_features.unsqueeze(1)  # Shape: (batch_size, 1, image_feature_dim)
+
+        # Apply Cross-Attention (image features attend to text embeddings)
+        attended_features = self.cross_attention(query=image_features, key=bert_embeddings, value=bert_embeddings)
+        attended_features = attended_features.squeeze(1)  # Shape: (batch_size, bert_embedding_dim)
+
+        # Concatenate attended features and image features
+        combined_features = torch.cat([image_features.squeeze(1), attended_features], dim=1)
+        combined_features = self.dropout(combined_features)
         # combined_output = F.relu(self.fc(combined_features))
-        # combined_output = self.dropout(combined_output)  # Apply dropout again before classification
+
+        combined_features = F.relu(self.fc1(combined_features))
+        combined_features = F.relu(self.fc2(combined_features) + combined_features)  # Residual connection
+        logits = self.fc3(combined_features)
+        # logits = self.classifier(combined_output)
 
 
-        # Pass through fully connected layers
-        combined_output = self.fc(combined_features)
-        logits = self.classifier(combined_output)
 
-        image_output = self.img_classifier(image_features)
-        bert_output = self.bert_classifier(bert_embeddings)
-
-        return {
-            "logits": logits,
-            "image_logits": image_output,
-            "bert_logits": bert_output
-        }
-
+        return {"logits": logits}
 
 
 
@@ -423,40 +325,40 @@ class FocalLoss(nn.Module):
 
 
 
-class SuperTrainer(Trainer):
-    def __init__(self, *args, super_loss_params=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        # self.custom_sampler = custom_sampler
-        # Initialize SuperLoss with provided parameters or default values
-        if super_loss_params is None:
-            super_loss_params = {'C': 10, 'lam': 1, 'batch_size': self.args.train_batch_size}
-        self.super_loss = SuperLoss(**super_loss_params)
+class AdaptiveLearnableFocalLoss(nn.Module):
+    def __init__(self, alpha_init=1.0, gamma_init=2.0, learnable=True, class_weights=None):
+        super(AdaptiveLearnableFocalLoss, self).__init__()
 
-        logging.getLogger().addHandler(logging.NullHandler())
-        
-        # Disable the natten.functional logger
-        logging.getLogger("natten.functional").setLevel(logging.ERROR)
+        # Learnable parameters for alpha and gamma
+        if learnable:
+            self.alpha = nn.Parameter(torch.tensor(alpha_init, requires_grad=True))
+            self.gamma = nn.Parameter(torch.tensor(gamma_init, requires_grad=True))
+        else:
+            self.alpha = torch.tensor(alpha_init)
+            self.gamma = torch.tensor(gamma_init)
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-        """
-        # Get logits and labels from inputs
-        outputs = model(**inputs)
-        logits = outputs.get('logits')
-        labels = inputs.get('labels')
+        # Class weights (passed as input)
+        self.class_weights = class_weights
 
-        # Compute the loss using SuperLoss
-        loss = self.super_loss(logits, labels)
-        
-        return (loss, outputs) if return_outputs else loss
-    
-    def log(self, logs: Dict[str, float]) -> None:
-        """
-        Override the log method to filter out unwanted messages
-        """
-        filtered_logs = {k: v for k, v in logs.items() if "natten.functional" not in str(k)}
-        super().log(filtered_logs)
+        # Adaptive weighting factor for focal and class-weighted loss
+        self.adaptive_factor = nn.Parameter(torch.tensor(0.5, requires_grad=True))
+
+    def forward(self, logits, targets):
+        # Compute Cross-Entropy Loss with class weights
+        ce_loss = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights.to(logits.device))
+
+        # Compute probability of the true class (pt)
+        pt = torch.exp(-ce_loss)
+
+        # Compute Focal Loss with learnable alpha and gamma
+        focal_term = (1 - pt) ** self.gamma
+        focal_loss = self.alpha * focal_term * ce_loss
+
+        # Adaptive weighting between focal loss and cross-entropy loss
+        combined_loss = self.adaptive_factor * focal_loss + (1 - self.adaptive_factor) * ce_loss
+
+        return combined_loss.mean()
+
 
 # Metric Calculation
 def compute_metrics(eval_pred):
@@ -533,3 +435,47 @@ def save_training_metadata(
         file.write(f"Test results {results}\n")
 
     print(f"Training metadata saved successfully at: {file_path}")
+
+
+def create_unique_output_dir(base_output_dir: str) -> str:
+    """
+    Creates a unique output directory appended with the current date and an incremented identifier.
+    
+    Args:
+        base_output_dir (str): The base directory where the new folder should be created.
+        
+    Returns:
+        str: The path of the newly created unique output directory.
+    """
+    # Get the current date in YYYYMMDD format
+    date_str = datetime.now().strftime("%Y%m%d")
+
+    # Get a list of existing directories in the base output directory
+    if not os.path.exists(base_output_dir):
+        os.makedirs(base_output_dir)
+
+    existing_dirs = [
+        d for d in os.listdir(base_output_dir)
+        if os.path.isdir(os.path.join(base_output_dir, d))
+    ]
+
+    # Filter for directories that start with the current date string
+    matching_dirs = [
+        d for d in existing_dirs
+        if d.startswith(date_str) and "_" in d and d.split("_")[-1].isdigit()
+    ]
+
+    # Determine the next numerical identifier
+    if matching_dirs:
+        last_num = max(int(d.split("_")[-1]) for d in matching_dirs)
+        new_num = last_num + 1
+    else:
+        new_num = 1
+
+    # Construct the new unique directory path
+    unique_output_dir = os.path.join(base_output_dir, f"{date_str}_{new_num}")
+
+    # Create the directory
+    os.makedirs(unique_output_dir, exist_ok=True)
+
+    return unique_output_dir
