@@ -41,7 +41,7 @@ from IPython.display import display, clear_output
 from tqdm.auto import tqdm
 
 # Custom functions (from your own module)
-from functions_older import *
+from functions_old import *
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -106,7 +106,7 @@ num_labels = 4
 a = 1
 angry_weight = a
 happy_weight = 1
-neutral_weight = 1.2
+neutral_weight = 1.5
 sad_weight = a
 
 class_weight_multipliers = {
@@ -143,7 +143,7 @@ overall_F1 = 0
 overall_labels= []
 overall_preds = []
 
-for i in range (len(unique_speakers)):
+for i in range (1):
 
 
     image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=4,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
@@ -167,7 +167,7 @@ for i in range (len(unique_speakers)):
 
 
 
-    speakers = [937+i] #    speakers = [937+i]
+    speakers = [943, 944] #    speakers = [937+i]
     print(f"\n {'#'*120}")
     print(f"                                          STARTING SPEAKER {i}                                                      ")
     print(f"\n {'#'*120}")
@@ -240,9 +240,9 @@ for i in range (len(unique_speakers)):
 
     class_weights = torch.tensor(class_weights).to(device)
 
-    # focal_loss = FocalLoss(alpha=1, gamma=2, class_weights=class_weights)
+    focal_loss = FocalLoss(alpha=1, gamma=2, class_weights=class_weights)
     # focal_loss = AdaptiveLearnableFocalLoss(class_weights=class_weights, learnable = False)
-    focal_loss =  AdaptiveLearnableFocalLoss(class_weights=class_weights)
+    # focal_train_loss =  AdaptiveLearnableFocalLoss(class_weights=class_weights)
 
     # Initialize lists to store loss values
     train_losses = []
