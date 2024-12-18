@@ -19,6 +19,9 @@ from typing import Dict  # Add this import
 from transformers import AutoImageProcessor, DinatForImageClassification, TrainingArguments, Trainer, AutoTokenizer, AutoModel
 from sklearn.utils.class_weight import compute_class_weight
 
+from scipy.special import expit
+from sklearn.metrics import mean_squared_error, mean_absolute_error, accuracy_score, f1_score, roc_auc_score, recall_score
+import numpy as np
 '''
 (C)	Mohammad Haghighat, University of Miami
 %       haghighat@ieee.org
@@ -91,6 +94,8 @@ def collate_fn(examples):
         "labels": labels,
         "bert_embeddings":bert_embeddings
     }
+
+
 
 
 
@@ -408,6 +413,24 @@ class FocalLoss(nn.Module):
         # Return mean loss
         return focal_loss.mean()
 
+class FocalLossRegression(nn.Module):
+    def __init__(self, alpha=1, gamma=2):
+        super(FocalLossRegression, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, predictions, targets):
+        # Compute Mean Squared Error Loss
+        mse_loss = (predictions - targets) ** 2
+        
+        # Compute the probability-like term (e.g., closeness to the target)
+        pt = torch.exp(-mse_loss)
+        
+        # Compute Focal Loss
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * mse_loss
+        
+        # Return mean loss
+        return focal_loss.mean()
 
 
 class AdaptiveLearnableFocalLoss(nn.Module):
@@ -454,6 +477,86 @@ def compute_metrics(eval_pred):
     f1 = f1_score(labels, predicted_classes, average='macro')
     kacc = top_k_accuracy_score(labels, predictions)
     return {'accuracy': accuracy, 'uar': uar, 'f1': f1, 'top_k_acc': kacc}
+
+
+def concordance_correlation_coefficient(y_true, y_pred):
+    """
+    Compute the Concordance Correlation Coefficient (CCC).
+    """
+    mean_true = np.mean(y_true)
+    mean_pred = np.mean(y_pred)
+    var_true = np.var(y_true)
+    var_pred = np.var(y_pred)
+    covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred))
+    ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
+    return ccc
+
+from scipy.special import expit
+from sklearn.metrics import recall_score, accuracy_score, f1_score, mean_squared_error
+import numpy as np
+
+def concordance_correlation_coefficient(y_true, y_pred):
+    """
+    Compute the Concordance Correlation Coefficient (CCC).
+    """
+    mean_true = np.mean(y_true)
+    mean_pred = np.mean(y_pred)
+    var_true = np.var(y_true)
+    var_pred = np.var(y_pred)
+    covariance = np.mean((y_true - mean_true) * (y_pred - mean_pred))
+    ccc = (2 * covariance) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
+    return ccc
+
+def compute_multilabel_metrics(eval_pred):
+    logits, labels = eval_pred
+    
+    # Convert logits to probabilities using sigmoid
+    predictions = expit(logits)
+    
+    # Multi-class label indices (first four columns in the logits/labels)
+    start_index = 0
+    end_index = 4  # Assuming the first 4 indices correspond to the multi-class labels
+    multi_class_pred = np.argmax(predictions[:, start_index:end_index], axis=1)
+    multi_class_true = np.argmax(labels[:, start_index:end_index], axis=1)
+    
+    # Compute metrics for multi-class labels
+    uar_all_classes = recall_score(multi_class_true, multi_class_pred, average='macro')
+    accuracy_all_classes = accuracy_score(multi_class_true, multi_class_pred)
+    f1_all_classes = f1_score(multi_class_true, multi_class_pred, average='macro')
+    
+    # Regression task indices
+    arousal_index = 4
+    valence_index = 5
+
+    # Arousal metrics
+    arousal_pred = predictions[:, arousal_index]
+    arousal_true = labels[:, arousal_index]
+    arousal_ccc = concordance_correlation_coefficient(arousal_true, arousal_pred)
+    # Assuming arousal_true and arousal_pred are numpy arrays
+    mask = ~np.isnan(arousal_true) & ~np.isnan(arousal_pred)
+    arousal_true = arousal_true[mask]
+    arousal_pred = arousal_pred[mask]
+
+    arousal_mse = mean_squared_error(arousal_true, arousal_pred)
+    
+    # Valence metrics
+    valence_pred = predictions[:, valence_index]
+    valence_true = labels[:, valence_index]
+    valence_ccc = concordance_correlation_coefficient(valence_true, valence_pred)
+    valence_mse = mean_squared_error(valence_true, valence_pred)
+    
+    # Prepare the final metrics dictionary
+    metrics = {
+        'uar': uar_all_classes,
+        'accuracy': accuracy_all_classes,
+        'f1': f1_all_classes,
+        'arousal_ccc': arousal_ccc,
+        'arousal_mse': arousal_mse,
+        'valence_ccc': valence_ccc,
+        'valence_mse': valence_mse,
+    }
+    
+    return metrics
 
 
 def calculate_class_weights(train_dataset, class_weight_multipliers):
@@ -564,3 +667,64 @@ def create_unique_output_dir(base_output_dir: str) -> str:
     os.makedirs(unique_output_dir, exist_ok=True)
 
     return unique_output_dir
+
+    from datasets import DatasetDict
+import numpy as np
+
+from collections import OrderedDict
+
+from collections import OrderedDict
+from collections import OrderedDict
+
+def process_dataset(dataset):
+    spkid_toGender = {
+        937: 1, 938: 1, 940: 2, 939: 1, 941: 2, 942: 2, 943: 1, 944: 2,
+        945: 2, 946: 1,
+        948: 1, 949: 1, 950: 1, 951: 1, 952: 1,
+        953: 0, 954: 0, 955: 0, 947: 0, 956: 0,
+        959: 0, 958: 1
+    }
+    
+    # Map speakerID to gender
+    def map_gender(example):
+        speaker_id = example['speakerID']
+        gender = spkid_toGender.get(speaker_id, -1)
+        if gender == -1:
+            print(f"Unmappable speaker ID: {speaker_id}")
+        return {'gender': gender}
+    dataset = dataset.map(map_gender)
+    
+    # Find unique values for 'label' column
+    unique_labels = sorted(set(dataset['label']))
+    print('Unique labels:')
+    print(unique_labels)
+    
+    # Create multi_labels array
+    def create_multi_labels(example):
+        label_encoding = [1 if example['label'] == label else 0 for label in unique_labels]
+        arousal_value = float(example['arousal'])  # Keep as regression
+        valence_value = float(example['valence'])  # Keep as regression
+        
+        multi_labels = label_encoding + [arousal_value, valence_value]
+        
+        return {'label': multi_labels}
+    
+    # Apply the function to create the multi_labels
+    dataset = dataset.map(create_multi_labels)
+    
+    # Create a mapping of what each index in multi_labels represents
+    multi_labels_mapping = OrderedDict()
+    for i, label in enumerate(unique_labels):
+        multi_labels_mapping[i] = f"Label_{label}"
+    multi_labels_mapping[len(unique_labels)] = "Arousal_regression"
+    multi_labels_mapping[len(unique_labels) + 1] = "Valence_regression"
+    
+    # Calculate the number of labels (length of multi_labels)
+    num_labels = len(multi_labels_mapping)
+    
+    return dataset, multi_labels_mapping, num_labels
+
+# Assume your dataset is called 'my_dataset'
+# Apply the function to all splits in the DatasetDict
+
+

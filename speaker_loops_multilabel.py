@@ -42,7 +42,7 @@ from tqdm.auto import tqdm
 
 # Custom functions (from your own module)
 # from functions_older import *
-from functions_old import *
+from functions_multi_label import *
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -53,7 +53,7 @@ pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_
 # # Load the state_dict
 # state_dict = torch.load(old_model)
 # model.load_state_dict(state_dict, strict=False)
-base_dir = "/media/carol/Data/Documents/Emo_rec/Notebooks/NLP_IMG/Ver2/DinatBert"
+base_dir = "/media/carol/Data/Documents/Emo_rec/Notebooks/NLP_IMG/Ver1/DinatBert"
 output_dir = create_unique_output_dir(base_dir)
 
 
@@ -77,11 +77,15 @@ train_dataset = dataset['train']
 validation_dataset = dataset['validation']
 test_dataset = dataset['test']
 
+# processed_dataset = {}
+# num_labels_split = {}
+# multi_labels_mapping = {}
 # Concatenate the datasets
-
-
 combined_dataset = concatenate_datasets([train_dataset, validation_dataset, test_dataset])
 
+# processed_dataset, multi_labels_mapping, num_labels = process_dataset(combined_dataset)
+
+# processed_dataset = DatasetDict(processed_dataset)
 
 os.makedirs(output_dir, exist_ok=True)
 
@@ -105,12 +109,12 @@ image_feature_dim = 512 #512
 
 bert_embedding_dim = 768
 combined_dim = 1024
-num_labels = 4
+# num_labels = 4
 
 a = 1
 angry_weight = 0.9
-happy_weight = 1.6
-neutral_weight = 1.2
+happy_weight = 1.4
+neutral_weight = 1.3
 sad_weight = a
 
 class_weight_multipliers = {
@@ -150,7 +154,7 @@ overall_preds = []
 for i in range (len(unique_speakers)):
 
 
-    image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=4,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
+    image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=num_labels,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
     bert_model = BertModel.from_pretrained("bert-base-uncased")
 
     # Define the combined model
@@ -160,7 +164,7 @@ for i in range (len(unique_speakers)):
         image_feature_dim=512,  # Match old model dimensions
         bert_embedding_dim=768,
         # combined_dim=1024,  # Match the old combined_dim
-        num_labels=4,  # Match the old number of labels
+        num_labels=num_labels,  # Match the old number of labels
         latent_dim = 16,
     )
 
@@ -181,10 +185,10 @@ for i in range (len(unique_speakers)):
     os.makedirs(new_model_path, exist_ok=True)
 
     # Create the test split
-    test_dataset = combined_dataset.filter(lambda x: x['speakerID'] in speakers).filter(filter_m_examples)
+    test_dataset = processed_dataset.filter(lambda x: x['speakerID'] in speakers).filter(filter_m_examples)
     
     # Create the remaining data
-    train_data= combined_dataset.filter(lambda x: x['speakerID'] not in speakers).filter(filter_m_examples)
+    train_data= processed_dataset.filter(lambda x: x['speakerID'] not in speakers).filter(filter_m_examples)
 
     train_split = train_data.train_test_split(test_size=0.2, seed=42)
 
@@ -219,7 +223,9 @@ for i in range (len(unique_speakers)):
         collate_fn=collate_fn
     )
 
-    class_weights = calculate_class_weights(train_dataset, class_weight_multipliers)
+    # class_weights = calculate_class_weights(train_dataset, class_weight_multipliers)
+    class_weights = [1, 1, 0.9, 0.9]# 1, 1]
+
     class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
     # class_weights = None
     model = CombinedModelsDCCA(
@@ -229,7 +235,7 @@ for i in range (len(unique_speakers)):
     bert_embedding_dim=768,
     # combined_dim=1024,  # Match the old combined_dim
     latent_dim = 16, 
-    num_labels=4,  # Match the old number of labels
+    num_labels=num_labels,  # Match the old number of labels
     )
 
     model = model.to(device)
@@ -289,10 +295,27 @@ for i in range (len(unique_speakers)):
             outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask, labels = labels)
 
             logits = outputs["logits"]
+                        # Split logits for classification and regression tasks
+            logits_class = logits[:, :4]  # First 4 for classification
+            logits_reg = logits[:, 4:]   # Last 2 for regression
+            # Categorical (Classification) Loss
+            labels_class = labels[:, :4].float()  # First 4 columns, convert to integer for classification
+            class_loss = focal_loss(logits_class, labels_class)
+
+            # Regression Loss
+            labels_reg = labels[:, 4:]  # Last 2 columns
+            reg_loss = nn.MSELoss()(logits_reg, labels_reg)
+
+
             dcca_loss = outputs["dcca_loss"]
-            combined_loss = focal_loss(logits, labels)  # Loss for combined features
-            alpha = 0.15 # Scale factor for DCCA loss
-            total_loss = combined_loss + alpha * dcca_loss
+            alpha_dcca = 0.2  # Scale factor for DCCA loss
+            alpha_class = 1.5  # Weight for classification loss
+            alpha_reg = 0.4   # Weight for regression loss
+
+            combined_loss = alpha_class * class_loss + alpha_reg * reg_loss
+            if dcca_loss is not None:
+                combined_loss += alpha_dcca * dcca_loss            
+
 
             optimizer_combined = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-5)
             
@@ -303,11 +326,15 @@ for i in range (len(unique_speakers)):
             # Update progress bar
             train_loss += combined_loss.item()
 
+            # print(f"Class Loss: {class_loss.item()}, Reg Loss: {reg_loss.item()}, DCCA Loss: {dcca_loss.item()}")
 
-            progress_bar.set_postfix({"combined_loss": combined_loss.item()}) #, "image_loss": image_loss.item(),"bert_loss": bert_loss.item(),})
+            progress_bar.set_postfix({"combined_loss": combined_loss.item(), "Class Loss": class_loss.item(), "Reg Loss": reg_loss.item(), "DCCA Loss": dcca_loss.item()}) #, "image_loss": image_loss.item(),"bert_loss": bert_loss.item(),})
 
-            predictions = torch.argmax(logits, dim=-1)
-            all_trained_preds.extend(predictions.cpu().numpy())
+            predictions = logits
+            class_preds = torch.argmax(logits[:, :4], dim=-1)
+
+
+            all_trained_preds.extend(class_preds.cpu().numpy())
 
             # ## Class distribution every 50 batches
             if j % 75 == 0:
@@ -344,30 +371,61 @@ for i in range (len(unique_speakers)):
                 outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask)
 
                 logits = outputs["logits"]
+                logits = outputs["logits"]
+                            # Split logits for classification and regression tasks
+                logits_class = logits[:, :4]  # First 4 for classification
+                logits_reg = logits[:, 4:]   # Last 2 for regression
+                # Categorical (Classification) Loss
+                labels_class = labels[:, :4].float()  # First 4 columns, convert to integer for classification
+                class_loss = focal_loss(logits_class, labels_class)
 
-                # Compute Focal Loss
-                loss = focal_loss(logits, labels)
-                val_loss += loss.item()
+                # Regression Loss
+                labels_reg = labels[:, 4:]  # Last 2 columns
+                reg_loss = nn.MSELoss()(logits_reg, labels_reg)
+
+
+                dcca_loss = outputs["dcca_loss"]
+                alpha_dcca = 0.1  # Scale factor for DCCA loss
+                alpha_class = 1.0  # Weight for classification loss
+                alpha_reg = 1.0    # Weight for regression loss
+
+                combined_loss = alpha_class * class_loss + alpha_reg * reg_loss
+                if dcca_loss is not None:
+                    combined_loss += alpha_dcca * dcca_loss        
+                val_loss += combined_loss.item()
 
                 # Get predictions
-                predictions = torch.argmax(logits, dim=-1)
+                
+                predictions = logits
+                class_preds = torch.argmax(logits[:, :4], dim=-1)
                 all_predictions.extend(predictions.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
-                all_val_preds.extend(predictions.cpu().numpy())
+                all_val_preds.extend(class_preds.cpu().numpy())
 
-
-                if j % 10 == 0:
-                    class_counts = Counter(all_val_preds)
-                    clean_class_counts = {int(k): v for k, v in class_counts.items()}
-                    # print(logits)
-                    print("Predicted class distribution:", clean_class_counts)
-                    all_val_preds = []
 
         # Calculate metrics
         avg_val_loss = val_loss / len(val_loader)
-        accuracy = accuracy_score(all_labels, all_predictions)
-        uar = recall_score(all_labels, all_predictions, average="macro")
-        f1 = f1_score(all_labels, all_predictions, average="macro")
+        # accuracy = accuracy_score(all_labels, all_predictions)
+        # uar = recall_score(all_labels, all_predictions, average="macro")
+        # f1 = f1_score(all_labels, all_predictions, average="macro")
+        all_labels = np.concatenate(all_labels, axis=0)
+
+        all_predictions = np.array(all_predictions)
+        num_samples = all_predictions.shape[0]
+        num_classes = all_predictions.shape[1]
+        all_labels = all_labels.reshape(num_samples, num_classes)
+
+        print(f"Shape of all_predictions: {all_predictions.shape}")
+        print(f"Shape of all_labels: {all_labels.shape}")
+
+
+        metrics = compute_multilabel_metrics((all_predictions, all_labels))
+        accuracy = metrics['accuracy']
+        uar = metrics['uar']
+
+        f1 = metrics['f1']
+
+        formatted_metrics = {key: f"{value:.4f}" for key, value in metrics.items()}
 
             # Append loss values
         train_losses.append(train_loss / len(train_loader))
@@ -389,6 +447,7 @@ for i in range (len(unique_speakers)):
         # Optionally add a pause to control update speed (e.g., 0.1 seconds)
         plt.pause(0.1)
         print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.4f}, UAR: {uar:.4f}, F1: {f1:.4f}")
+        print(formatted_metrics)
 
 
         # Early stopping logic based on UAR
@@ -431,31 +490,120 @@ for i in range (len(unique_speakers)):
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
             bert_embeddings = batch["bert_embeddings"].to(device)
-        
-            outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask)        
+
+
+            # Forward pass
+            # outputs = model(pixel_values=pixel_values, bert_embeddings=bert_embeddings)
+            outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask)
+
             logits = outputs["logits"]
-            # Compute loss
-            loss = F.cross_entropy(logits, labels)
-            test_loss += loss.item()
+            logits = outputs["logits"]
+                        # Split logits for classification and regression tasks
+            logits_class = logits[:, :4]  # First 4 for classification
+            logits_reg = logits[:, 4:]   # Last 2 for regression
+            # Categorical (Classification) Loss
+            labels_class = labels[:, :4].float()  # First 4 columns, convert to integer for classification
+            class_loss = focal_loss(logits_class, labels_class)
+
+            # Regression Loss
+            labels_reg = labels[:, 4:]  # Last 2 columns
+            reg_loss = nn.MSELoss()(logits_reg, labels_reg)
+
+
+            dcca_loss = outputs["dcca_loss"]
+            alpha_dcca = 0.2 # Scale factor for DCCA loss
+            alpha_class = 5  # Weight for classification loss
+            alpha_reg = 1.0    # Weight for regression loss
+
+            combined_loss = alpha_class * class_loss + alpha_reg * reg_loss
+            if dcca_loss is not None:
+                combined_loss += alpha_dcca * dcca_loss        
+            test_loss += combined_loss.item()
 
             # Get predictions
-            predictions = torch.argmax(logits, dim=-1)
+            
+            predictions = logits
+            class_preds = torch.argmax(logits[:, :4], dim=-1)
             all_test_predictions.extend(predictions.cpu().numpy())
             all_test_labels.extend(labels.cpu().numpy())
+            all_val_preds.extend(class_preds.cpu().numpy())
+
+
 
     # Compute test metrics
+    # avg_test_loss = test_loss / len(test_loader)
+    # test_accuracy = accuracy_score(all_test_labels, all_test_predictions)
+    # test_uar = recall_score(all_test_labels, all_test_predictions, average="macro")
+    # test_f1 = f1_score(all_test_labels, all_test_predictions, average="macro")
+    # all_labels = np.concatenate(all_labels, axis=0)
+    # Calculate metrics
     avg_test_loss = test_loss / len(test_loader)
-    test_accuracy = accuracy_score(all_test_labels, all_test_predictions)
-    test_uar = recall_score(all_test_labels, all_test_predictions, average="macro")
-    test_f1 = f1_score(all_test_labels, all_test_predictions, average="macro")
+    # accuracy = accuracy_score(all_labels, all_predictions)
+    # uar = recall_score(all_labels, all_predictions, average="macro")
+    # f1 = f1_score(all_labels, all_predictions, average="macro")
+    all_test_labels = np.concatenate(all_test_labels, axis=0)
 
+    all_predictions = np.array(all_test_predictions)
+    num_samples = all_predictions.shape[0]
+    num_classes = all_predictions.shape[1]
+    all_test_labels = all_test_labels.reshape(num_samples, num_classes)
+
+    print(f"Shape of all_predictions: {all_predictions.shape}")
+    print(f"Shape of all_labels: {all_test_labels.shape}")
+
+
+        # Append loss values
+    all_predictions = np.array(all_predictions)
+    num_samples = all_predictions.shape[0]
+    num_classes = all_predictions.shape[1]
+    all_test_labels = all_test_labels.reshape(num_samples, num_classes)
+
+    metrics_test = compute_multilabel_metrics((all_predictions, all_test_labels))
+
+    test_accuracy = metrics['accuracy']
+    test_uar = metrics['uar']
+    test_f1 = metrics['f1']
+
+
+    f1 = metrics['f1']
     print(f"Test Loss: {avg_test_loss:.4f}, Accuracy: {test_accuracy:.4f}, UAR: {test_uar:.4f}, F1: {test_f1:.4f}")
 
     metrics = f"Test Loss: {avg_test_loss:.4f}, Accuracy: {test_accuracy:.4f}, UAR: {test_uar:.4f}, F1: {test_f1:.4f}"
 
+    formatted_metrics = {key: f"{value:.4f}" for key, value in metrics_test.items()}
+    print(formatted_metrics)
+
+
+        # Convert predictions and labels to numpy arrays (if not already)
+    all_test_predictions = np.array(all_predictions)  # Ensure predictions are a numpy array
+    all_test_labels = np.array(all_test_labels)  # Ensure labels are a numpy array
+
+    # Debugging: Check shapes and types
+    print(f"Predictions type: {type(all_test_predictions)}, shape: {all_test_predictions.shape}")
+    print(f"Labels type: {type(all_test_labels)}, shape: {all_test_labels.shape}")
+
+    # Perform argmax along axis 1 to get predicted/true class indices
+    
+    # Extract the first four columns
+    # Extract and compute argmax for the first four columns
+    if all_test_predictions.ndim == 2 and all_test_predictions.shape[1] >= 4:
+        cm_preds = all_test_predictions[:, :4]  # First four columns of predictions
+        cm_preds = np.argmax(cm_preds, axis=1)  # Compute argmax along rows
+    else:
+        raise ValueError("all_test_predictions must be at least 2D with 4 or more columns.")
+
+    if all_test_labels.ndim == 2 and all_test_labels.shape[1] >= 4:
+        cm_labels = all_test_labels[:, :4]  # First four columns of labels
+        cm_labels = np.argmax(cm_labels, axis=1)  # Compute argmax along rows
+    else:
+        raise ValueError("all_test_labels must be at least 2D with 4 or more columns.")
+
+    print(f"cm_preds type: {type(cm_preds)}, shape: {cm_preds.shape}")
+    print(f"cm_labels type: {type(cm_labels)}, shape: {cm_labels.shape}")
+
     # Confusion Matrix
-    cm = confusion_matrix(all_test_labels, all_test_predictions)
-    classes = np.unique(all_test_labels)
+    cm = confusion_matrix(cm_labels, cm_preds)
+    classes = np.unique(cm_labels)
 
     # Plotting Confusion Matrix
     plt.figure(figsize=(8, 6))
@@ -502,7 +650,7 @@ for i in range (len(unique_speakers)):
         neutral_weight=neutral_weight,
         sad_weight=sad_weight,
         weight_decay=weight_decay,
-        results= metrics
+        results= metrics_test
 
     )
     overall_F1+=test_f1
