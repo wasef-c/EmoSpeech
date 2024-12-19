@@ -18,9 +18,10 @@ from typing import Dict  # Add this import
 from transformers import AutoImageProcessor, DinatForImageClassification, TrainingArguments, Trainer, AutoTokenizer, AutoModel
 from sklearn.utils.class_weight import compute_class_weight
 
+image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224")
 
 # Initialize the image processor and BERT tokenizer
-image_processor = AutoImageProcessor.from_pretrained("shi-labs/dinat-mini-in1k-224")
+# image_processor = AutoImageProcessor.from_pretrained("shi-labs/dinat-mini-in1k-224")
 tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
 
@@ -236,6 +237,11 @@ class GeMPooling(nn.Module):
 
     def forward(self, x):
         # Permute to (batch_size, channels, height, width)
+        if x.dim() == 3:
+            patch_dim = int((x.size(1) - 1) ** 0.5)  # Calculate grid size
+            x = x[:, 1:, :]  # Remove classification token if present
+            x = x.view(x.size(0), patch_dim, patch_dim, x.size(2))  # Reshape to [batch_size, height, width, channels]
+
         x = x.permute(0, 3, 1, 2)
         # Apply GeM pooling
         pooled = torch.mean(x.clamp(min=self.eps).pow(self.p), dim=(2, 3)).pow(1.0 / self.p)
