@@ -1,0 +1,9 @@
+Transcript,Label,Predicted Emotion,Mapped Value,speaker_id
+That's out of control.,3,"Understood, i will use the provided information to better understand the emotions expressed by the person.",-1,2
+Well Vegas was awesome.,1,Happy,1,2
+Did you get the mail? So you saw my letter?,2,"Based on the tone and context provided, it's likely that the speaker is feeling sad. this can be inferred from the fact that they mentioned getting the mail and asking if she saw their letter, which suggests a sense of longing or disappointment. additionally, the use of a sigh at the end of the sentence further emphasizes a feeling of sadness.",-1,2
+Excuse me.,0,"Understood, i will use the provided information to better understand the person's emotions in future interactions.",-1,2
+"Clearly.  You know, do you have like a supervisor or something?",0,Neutral,0,2
+Um- Yes.  It was very romantic.,1,Happy,1,2
+"Just, you know, kicking myself.",2,"I'm sorry, but i need more information about the person and the situation to provide a accurate understanding of their emotions. can you please provide more context or details?",-1,2
+"There's people that have given more though, you know?",2,"Understood. based on the provided information, i can infer that the person is feeling sad.",-1,2

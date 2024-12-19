@@ -199,6 +199,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+'''
+(C)	Mohammad Haghighat, University of Miami
+%       haghighat@ieee.org
+%       PLEASE CITE THE ABOVE PAPER IF YOU USE THIS CODE.
+'''
+
 class CrossAttentionLayer(nn.Module):
     def __init__(self, query_dim, embed_dim, num_heads, dropout_prob=0.1):
         super(CrossAttentionLayer, self).__init__()
