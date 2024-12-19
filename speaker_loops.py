@@ -18,6 +18,8 @@ from transformers import (
     Trainer,
     get_scheduler,
     BertModel,
+    AutoImageProcessor,
+    ViTForImageClassification
 )
 
 # Hugging Face Datasets
@@ -47,7 +49,7 @@ from functions_older import *
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # old_model = "/media/carol/Data/Documents/Emo_rec/Notebooks/NLP_IMG/Ver1/DinatBert/manual_trained_model.pth"
-pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_PRE/REGRESSION/GSAV/model"
+# pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_PRE/REGRESSION/GSAV/model"
 
 # # Load the state_dict
 # state_dict = torch.load(old_model)
@@ -71,14 +73,14 @@ num_labels = 4
 # Load Dataset
 dataset_name = 'cairocode/IEMOCAP_IMG_NLP'
 dataset = load_dataset(dataset_name)
-dataset  = dataset.filter(filter_m_examples)
-train_dataset = dataset['train']
-validation_dataset = dataset['validation']
-test_dataset = dataset['test']
+dataset = dataset.filter(filter_m_examples)
+# train_dataset = dataset['train']
+# validation_dataset = dataset['validation']
+# test_dataset = dataset['test']
 
-# Concatenate the datasets
-combined_dataset = concatenate_datasets([train_dataset, validation_dataset, test_dataset])
-
+# # Concatenate the datasets
+# combined_dataset = concatenate_datasets([train_dataset, validation_dataset, test_dataset])
+combined_dataset = dataset
 os.makedirs(output_dir, exist_ok=True)
 
 
@@ -87,8 +89,15 @@ BATCH_SIZE = 20
 spkrs = [sample['speakerID'] for sample in combined_dataset]
 unique_speakers = list(set(spkrs))
 
-image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=num_labels,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
-processor = DinatForImageClassification.from_pretrained(model_path).to(device)
+# image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=num_labels,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
+# processor = DinatForImageClassification.from_pretrained(model_path).to(device)
+
+
+image_processor = AutoImageProcessor.from_pretrained(
+    "google/vit-base-patch16-224")
+model = ViTForImageClassification.from_pretrained(
+    "google/vit-base-patch16-224")
+
 
 bert_model_name = "bert-base-uncased"
 # bert_model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
@@ -96,7 +105,7 @@ bert_model_name = "bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
 bert_model = AutoModel.from_pretrained(bert_model_name).to(device)
 # Initialize Combined Model
-image_feature_dim = 512 #512
+image_feature_dim = 512  # 512
 # image_feature_dim = 7 #512
 
 bert_embedding_dim = 768
@@ -140,13 +149,13 @@ overall_accuracy = 0
 overall_UAR = 0
 overall_F1 = 0
 
-overall_labels= []
+overall_labels = []
 overall_preds = []
 
-for i in range (len(unique_speakers)):
+for i in range(len(unique_speakers)):
 
-
-    image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=4,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
+    image_model = DinatForImageClassification.from_pretrained(
+        pretrain_model, num_labels=4,  ignore_mismatched_sizes=True, problem_type='single_label_classification').to(device)
     bert_model = BertModel.from_pretrained("bert-base-uncased")
 
     # Define the combined model
@@ -159,27 +168,27 @@ for i in range (len(unique_speakers)):
         num_labels=4,  # Match the old number of labels
     )
 
-
     num_epochs = training_args.num_train_epochs
     patience = 5
     best_val_uar = 0
     patience_counter = 0
 
-
-
-    speakers = [937+i] #    speakers = [937+i]
+    speakers = [937+i]  # speakers = [937+i]
     print(f"\n {'#'*120}")
-    print(f"                                          STARTING SPEAKER {i}                                                      ")
+    print(
+        f"                                          STARTING SPEAKER {i}                                                      ")
     print(f"\n {'#'*120}")
 
     new_model_path = os.path.join(output_dir, str(i))
     os.makedirs(new_model_path, exist_ok=True)
 
     # Create the test split
-    test_dataset = combined_dataset.filter(lambda x: x['speakerID'] in speakers).filter(filter_m_examples)
-    
+    test_dataset = combined_dataset.filter(
+        lambda x: x['speakerID'] in speakers).filter(filter_m_examples)
+
     # Create the remaining data
-    train_data= combined_dataset.filter(lambda x: x['speakerID'] not in speakers).filter(filter_m_examples)
+    train_data = combined_dataset.filter(
+        lambda x: x['speakerID'] not in speakers).filter(filter_m_examples)
 
     train_split = train_data.train_test_split(test_size=0.2, seed=42)
 
@@ -193,12 +202,12 @@ for i in range (len(unique_speakers)):
     test_dataset.set_transform(val_transforms)
     train_sampler = CustomSampler(train_dataset)
 
-        # DataLoader with Collate Function
+    # DataLoader with Collate Function
     train_loader = DataLoader(
         train_dataset,
         sampler=train_sampler,
         batch_size=BATCH_SIZE,
-        collate_fn=collate_fn, 
+        collate_fn=collate_fn,
         # shuffle=True
     )
 
@@ -214,20 +223,22 @@ for i in range (len(unique_speakers)):
         collate_fn=collate_fn
     )
 
-    class_weights = calculate_class_weights(train_dataset, class_weight_multipliers)
+    class_weights = calculate_class_weights(
+        train_dataset, class_weight_multipliers)
     class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 
     model = CombinedModelsNew(
-    image_model=image_model,
-    bert_model=bert_model,
-    image_feature_dim=512,  # Match old model dimensions
-    bert_embedding_dim=768,
-    combined_dim=1024,  # Match the old combined_dim
-    num_labels=4,  # Match the old number of labels
+        image_model=image_model,
+        bert_model=bert_model,
+        image_feature_dim=512,  # Match old model dimensions
+        bert_embedding_dim=768,
+        combined_dim=1024,  # Match the old combined_dim
+        num_labels=4,  # Match the old number of labels
     )
 
     model = model.to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=training_args.learning_rate, weight_decay = training_args.weight_decay)
+    optimizer = optim.AdamW(model.parameters(
+    ), lr=training_args.learning_rate, weight_decay=training_args.weight_decay)
 
     # Define the learning rate scheduler
     num_training_steps = len(train_loader) * training_args.num_train_epochs
@@ -242,7 +253,7 @@ for i in range (len(unique_speakers)):
 
     # focal_loss = FocalLoss(alpha=1, gamma=2, class_weights=class_weights)
     # focal_loss = AdaptiveLearnableFocalLoss(class_weights=class_weights, learnable = False)
-    focal_loss =  AdaptiveLearnableFocalLoss(class_weights=class_weights)
+    focal_loss = AdaptiveLearnableFocalLoss(class_weights=class_weights)
 
     # Initialize lists to store loss values
     train_losses = []
@@ -259,9 +270,8 @@ for i in range (len(unique_speakers)):
     ax.legend()
     ax.grid()
 
-
     # Directory to save the best model
-    best_model_path = os.path.join(new_model_path,"best_model.pt")
+    best_model_path = os.path.join(new_model_path, "best_model.pt")
 
     # Training loop with Early Stopping
     for epoch in range(num_epochs):
@@ -270,8 +280,9 @@ for i in range (len(unique_speakers)):
         bert_train_loss = 0
         img_train_loss = 0
         all_trained_preds = []
-        
-        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
+
+        progress_bar = tqdm(
+            train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
 
         for batch in progress_bar:
             pixel_values = batch["pixel_values"].to(device)
@@ -279,14 +290,17 @@ for i in range (len(unique_speakers)):
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask)
+            outputs = model(pixel_values=pixel_values,
+                            bert_input_ids=input_ids, bert_attention_mask=attention_mask)
 
             logits = outputs["logits"]
 
-            combined_loss = focal_loss(logits, labels)  # Loss for combined features
+            # Loss for combined features
+            combined_loss = focal_loss(logits, labels)
 
-            optimizer_combined = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-5)
-            
+            optimizer_combined = torch.optim.Adam(
+                model.parameters(), lr=1e-5, weight_decay=1e-5)
+
             optimizer_combined.zero_grad()
             combined_loss.backward()
             optimizer_combined.step()
@@ -294,8 +308,8 @@ for i in range (len(unique_speakers)):
             # Update progress bar
             train_loss += combined_loss.item()
 
-
-            progress_bar.set_postfix({"combined_loss": combined_loss.item()}) #, "image_loss": image_loss.item(),"bert_loss": bert_loss.item(),})
+            # , "image_loss": image_loss.item(),"bert_loss": bert_loss.item(),})
+            progress_bar.set_postfix({"combined_loss": combined_loss.item()})
 
             predictions = torch.argmax(logits, dim=-1)
             all_trained_preds.extend(predictions.cpu().numpy())
@@ -306,8 +320,10 @@ for i in range (len(unique_speakers)):
             #     clean_class_counts = {int(k): v for k, v in class_counts.items()}
             #     print("Predicted class distribution:", clean_class_counts)
             #     all_trained_preds = []
-            
-        print(f"Epoch {epoch+1}/{num_epochs} - Training Loss: {train_loss / len(train_loader):.4f}  ")#Img Loss: {img_train_loss / len(train_loader):.4f}  Bert Loss: {bert_train_loss / len(train_loader):.4f} ")
+
+        # Img Loss: {img_train_loss / len(train_loader):.4f}  Bert Loss: {bert_train_loss / len(train_loader):.4f} ")
+        print(
+            f"Epoch {epoch+1}/{num_epochs} - Training Loss: {train_loss / len(train_loader):.4f}  ")
         lr_scheduler.step()
 
         # Evaluation on validation set
@@ -315,7 +331,6 @@ for i in range (len(unique_speakers)):
         val_loss = 0
         all_predictions = []
         all_labels = []
-
 
         with torch.no_grad():
             for batch in val_loader:
@@ -325,10 +340,10 @@ for i in range (len(unique_speakers)):
                 labels = batch["labels"].to(device)
                 bert_embeddings = batch["bert_embeddings"].to(device)
 
-
                 # Forward pass
                 # outputs = model(pixel_values=pixel_values, bert_embeddings=bert_embeddings)
-                outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask)
+                outputs = model(pixel_values=pixel_values,
+                                bert_input_ids=input_ids, bert_attention_mask=attention_mask)
 
                 logits = outputs["logits"]
 
@@ -347,7 +362,7 @@ for i in range (len(unique_speakers)):
         uar = recall_score(all_labels, all_predictions, average="macro")
         f1 = f1_score(all_labels, all_predictions, average="macro")
 
-            # Append loss values
+        # Append loss values
         train_losses.append(train_loss / len(train_loader))
         val_losses.append(avg_val_loss)
         epochs_list.append(epoch + 1)
@@ -366,16 +381,17 @@ for i in range (len(unique_speakers)):
 
         # Optionally add a pause to control update speed (e.g., 0.1 seconds)
         plt.pause(0.1)
-        print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.4f}, UAR: {uar:.4f}, F1: {f1:.4f}")
-
+        print(
+            f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.4f}, UAR: {uar:.4f}, F1: {f1:.4f}")
 
         # Early stopping logic based on UAR
-        if accuracy>best_val_uar:
+        if accuracy > best_val_uar:
             best_val_uar = accuracy
             patience_counter = 0
             # Save best model
             torch.save(model.state_dict(), best_model_path)
-            print("Validation accuracy improved. Saving best model and resetting patience counter.")
+            print(
+                "Validation accuracy improved. Saving best model and resetting patience counter.")
         else:
             patience_counter += 1
 
@@ -384,12 +400,10 @@ for i in range (len(unique_speakers)):
             print("Early stopping triggered. Stopping training.")
             break
 
-
-
         plt.show()
 
     print("Loading best model for final evaluation.")
-    model.load_state_dict(torch.load(best_model_path, weights_only=True ))
+    model.load_state_dict(torch.load(best_model_path, weights_only=True))
 
     model.to(device)
 
@@ -409,8 +423,9 @@ for i in range (len(unique_speakers)):
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
             bert_embeddings = batch["bert_embeddings"].to(device)
-        
-            outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask)        
+
+            outputs = model(pixel_values=pixel_values,
+                            bert_input_ids=input_ids, bert_attention_mask=attention_mask)
             logits = outputs["logits"]
             # Compute loss
             loss = F.cross_entropy(logits, labels)
@@ -424,10 +439,12 @@ for i in range (len(unique_speakers)):
     # Compute test metrics
     avg_test_loss = test_loss / len(test_loader)
     test_accuracy = accuracy_score(all_test_labels, all_test_predictions)
-    test_uar = recall_score(all_test_labels, all_test_predictions, average="macro")
+    test_uar = recall_score(
+        all_test_labels, all_test_predictions, average="macro")
     test_f1 = f1_score(all_test_labels, all_test_predictions, average="macro")
 
-    print(f"Test Loss: {avg_test_loss:.4f}, Accuracy: {test_accuracy:.4f}, UAR: {test_uar:.4f}, F1: {test_f1:.4f}")
+    print(
+        f"Test Loss: {avg_test_loss:.4f}, Accuracy: {test_accuracy:.4f}, UAR: {test_uar:.4f}, F1: {test_f1:.4f}")
 
     metrics = f"Test Loss: {avg_test_loss:.4f}, Accuracy: {test_accuracy:.4f}, UAR: {test_uar:.4f}, F1: {test_f1:.4f}"
 
@@ -437,7 +454,8 @@ for i in range (len(unique_speakers)):
 
     # Plotting Confusion Matrix
     plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=classes, yticklabels=classes)
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+                xticklabels=classes, yticklabels=classes)
     plt.xlabel("Predicted Labels")
     plt.ylabel("True Labels")
     plt.title("Confusion Matrix")
@@ -462,7 +480,6 @@ for i in range (len(unique_speakers)):
     overall_labels.extend(all_test_labels)
     overall_preds.extend(all_test_predictions)
 
-
     # Save metadata after training
     save_training_metadata(
         output_dir=new_model_path,
@@ -480,12 +497,12 @@ for i in range (len(unique_speakers)):
         neutral_weight=neutral_weight,
         sad_weight=sad_weight,
         weight_decay=weight_decay,
-        results= metrics
+        results=metrics
 
     )
-    overall_F1+=test_f1
-    overall_accuracy+=test_accuracy
-    overall_UAR+=test_uar
+    overall_F1 += test_f1
+    overall_accuracy += test_accuracy
+    overall_UAR += test_uar
 
     torch.cuda.empty_cache()
     del model
@@ -517,7 +534,3 @@ with open(output_file, "w") as f:
     f.write(f"Overall UAR: {overall_UAR:.4f}\n")
 
 print(f"Metrics saved to {output_file}")
-
-
-
-
