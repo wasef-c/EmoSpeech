@@ -18,6 +18,7 @@ from transformers import (
     Trainer,
     get_scheduler,
     BertModel,
+    ViTForImageClassification,
 )
 
 # Hugging Face Datasets
@@ -52,7 +53,7 @@ pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_
 # # Load the state_dict
 # state_dict = torch.load(old_model)
 # model.load_state_dict(state_dict, strict=False)
-base_dir = "/media/carol/Data/Documents/Emo_rec/Notebooks/NLP_IMG/Ver1/DinatBert"
+base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\VIT_BERT\001"
 output_dir = create_unique_output_dir(base_dir)
 
 
@@ -69,16 +70,16 @@ combined_dim = 1024
 num_labels = 4
 
 # Load Dataset
-dataset_name = 'cairocode/IEMOCAP_IMG_NLP'
+dataset_name = 'cairocode/IEMO_Wav2Vec2'
 dataset = load_dataset(dataset_name)
-dataset  = dataset.filter(filter_m_examples)
-train_dataset = dataset['train']
-validation_dataset = dataset['validation']
-test_dataset = dataset['test']
+# dataset  = dataset.filter(filter_m_examples)
+# train_dataset = dataset['train']
+# validation_dataset = dataset['validation']
+# test_dataset = dataset['test']
 
-# Concatenate the datasets
-combined_dataset = concatenate_datasets([train_dataset, validation_dataset, test_dataset])
-
+# # Concatenate the datasets
+# combined_dataset = concatenate_datasets([train_dataset, validation_dataset, test_dataset])
+combined_dataset = dataset['train']
 os.makedirs(output_dir, exist_ok=True)
 
 
@@ -87,8 +88,10 @@ BATCH_SIZE = 20
 spkrs = [sample['speakerID'] for sample in combined_dataset]
 unique_speakers = list(set(spkrs))
 
-image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=num_labels,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
-processor = DinatForImageClassification.from_pretrained(model_path).to(device)
+# image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=num_labels,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
+# processor = DinatForImageClassification.from_pretrained(model_path).to(device)
+
+image_model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224", num_labels=4,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
 
 bert_model_name = "bert-base-uncased"
 # bert_model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
@@ -96,7 +99,7 @@ bert_model_name = "bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
 bert_model = AutoModel.from_pretrained(bert_model_name).to(device)
 # Initialize Combined Model
-image_feature_dim = 512 #512
+image_feature_dim = 768 #512
 # image_feature_dim = 7 #512
 
 bert_embedding_dim = 768
@@ -106,7 +109,7 @@ num_labels = 4
 a = 1
 angry_weight = a
 happy_weight = 1
-neutral_weight = 1.2
+neutral_weight = 1.3
 sad_weight = a
 
 class_weight_multipliers = {
@@ -146,8 +149,13 @@ overall_preds = []
 for i in range (len(unique_speakers)):
 
 
-    image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=4,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
+    # image_model = DinatForImageClassification.from_pretrained(pretrain_model,num_labels=4,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
     bert_model = BertModel.from_pretrained("bert-base-uncased")
+
+    processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224")
+    image_model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224", num_labels=4,  ignore_mismatched_sizes=True, problem_type = 'single_label_classification').to(device)
+    bert_model = BertModel.from_pretrained("bert-base-uncased")
+
 
     # Define the combined model
     model = CombinedModelsNew(
@@ -167,7 +175,7 @@ for i in range (len(unique_speakers)):
 
 
 
-    speakers = [937+i] #    speakers = [937+i]
+    speakers = [1+i] #    speakers = [937+i]
     print(f"\n {'#'*120}")
     print(f"                                          STARTING SPEAKER {i}                                                      ")
     print(f"\n {'#'*120}")
@@ -220,7 +228,7 @@ for i in range (len(unique_speakers)):
     model = CombinedModelsNew(
     image_model=image_model,
     bert_model=bert_model,
-    image_feature_dim=512,  # Match old model dimensions
+    image_feature_dim=768,  # Match old model dimensions
     bert_embedding_dim=768,
     combined_dim=1024,  # Match the old combined_dim
     num_labels=4,  # Match the old number of labels
@@ -248,16 +256,6 @@ for i in range (len(unique_speakers)):
     train_losses = []
     val_losses = []
     epochs_list = []
-
-    # Create the figure and axis for the plot
-    fig, ax = plt.subplots()
-    train_line, = ax.plot([], [], label="Training Loss", color='blue')
-    val_line, = ax.plot([], [], label="Validation Loss", color='orange')
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Loss")
-    ax.set_title("Live Loss Curve")
-    ax.legend()
-    ax.grid()
 
 
     # Directory to save the best model
@@ -352,20 +350,6 @@ for i in range (len(unique_speakers)):
         val_losses.append(avg_val_loss)
         epochs_list.append(epoch + 1)
 
-        # Update the data for the plot
-        train_line.set_data(epochs_list, train_losses)
-        val_line.set_data(epochs_list, val_losses)
-
-        # Adjust the axis limits
-        ax.relim()
-        ax.autoscale_view()
-
-        # Display the updated plot
-        # clear_output(wait=True)
-        display(fig)
-
-        # Optionally add a pause to control update speed (e.g., 0.1 seconds)
-        plt.pause(0.1)
         print(f"Validation Loss: {avg_val_loss:.4f}, Accuracy: {accuracy:.4f}, UAR: {uar:.4f}, F1: {f1:.4f}")
 
 
@@ -445,8 +429,8 @@ for i in range (len(unique_speakers)):
     # Save the plot
     save_path = os.path.join(new_model_path, "confusion_matrix.png")
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
-    # plt.close()  # Close the figure to free up memory
-    plt.show()
+    plt.close()  # Close the figure to free up memory
+    # plt.show()
 
     print(f"Confusion matrix saved to: {save_path}")
 
@@ -517,7 +501,6 @@ with open(output_file, "w") as f:
     f.write(f"Overall UAR: {overall_UAR:.4f}\n")
 
 print(f"Metrics saved to {output_file}")
-
 
 
 

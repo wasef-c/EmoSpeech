@@ -19,11 +19,13 @@ from typing import Dict  # Add this import
 from transformers import AutoImageProcessor, DinatForImageClassification, TrainingArguments, Trainer, AutoTokenizer, AutoModel
 from sklearn.utils.class_weight import compute_class_weight
 
-
+'''
+(C)	Mohammad Haghighat, University of Miami
+%       haghighat@ieee.org
+%       PLEASE CITE THE ABOVE PAPER IF YOU USE THIS CODE.
+'''
 # Initialize the image processor and BERT tokenizer
-# image_processor = AutoImageProcessor.from_pretrained("shi-labs/dinat-mini-in1k-224")
-image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224")
-
+image_processor = AutoImageProcessor.from_pretrained("shi-labs/dinat-mini-in1k-224")
 tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
 
@@ -233,96 +235,131 @@ class GeMPooling(nn.Module):
 
     def forward(self, x):
         # Permute to (batch_size, channels, height, width)
-        if x.dim() == 3:
-            patch_dim = int((x.size(1) - 1) ** 0.5)  # Calculate grid size
-            x = x[:, 1:, :]  # Remove classification token if present
-            x = x.view(x.size(0), patch_dim, patch_dim, x.size(2))  # Reshape to [batch_size, height, width, channels]
-
         x = x.permute(0, 3, 1, 2)
         # Apply GeM pooling
         pooled = torch.mean(x.clamp(min=self.eps).pow(self.p), dim=(2, 3)).pow(1.0 / self.p)
         return pooled
     
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from sklearn.cross_decomposition import CCA
 
-class CombinedModelsNew(nn.Module):
-    def __init__(self, image_model, bert_model, image_feature_dim, bert_embedding_dim, combined_dim, num_labels, dropout_prob=0.1, latent_dim = 4):
-        super(CombinedModelsNew, self).__init__()
+import numpy as np
+import torch
+import torch.nn as nn
+
+import torch
+import torch.nn as nn
+import numpy as np
+
+from sklearn.cross_decomposition import CCA
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+import torch
+import torch.nn as nn
+
+class DCCALoss(nn.Module):
+    def __init__(self, latent_dim, epsilon=1e-8):
+        super(DCCALoss, self).__init__()
+        self.latent_dim = latent_dim
+        self.epsilon = epsilon
+
+    def forward(self, view1, view2):
+        """
+        Compute the DCCA loss.
+        :param view1: Projected features from modality 1 (batch_size, latent_dim).
+        :param view2: Projected features from modality 2 (batch_size, latent_dim).
+        :return: Negative canonical correlation.
+        """
+        batch_size = view1.size(0)
+
+        # Center the features
+        view1 -= view1.mean(dim=0)
+        view2 -= view2.mean(dim=0)
+
+        # Covariance matrices
+        cov_11 = torch.mm(view1.T, view1) / (batch_size - 1) + self.epsilon * torch.eye(self.latent_dim).to(view1.device)
+        cov_22 = torch.mm(view2.T, view2) / (batch_size - 1) + self.epsilon * torch.eye(self.latent_dim).to(view2.device)
+        cov_12 = torch.mm(view1.T, view2) / (batch_size - 1)
+
+        # Eigen decomposition for canonical correlation
+        eigvals_1, eigvecs_1 = torch.linalg.eigh(cov_11)
+        eigvals_2, eigvecs_2 = torch.linalg.eigh(cov_22)
+
+        # Whiten the covariance matrices
+        cov_11_whitened = eigvecs_1 @ torch.diag(torch.sqrt(1.0 / eigvals_1)) @ eigvecs_1.T
+        cov_22_whitened = eigvecs_2 @ torch.diag(torch.sqrt(1.0 / eigvals_2)) @ eigvecs_2.T
+
+        T = cov_11_whitened @ cov_12 @ cov_22_whitened
+        _, singular_values, _ = torch.svd(T)
+
+        # Return the negative sum of canonical correlations
+        return -torch.sum(singular_values[:self.latent_dim])
+
+
+class CombinedModelsDCCA(nn.Module):
+    def __init__(self, image_model, bert_model, image_feature_dim, bert_embedding_dim, latent_dim, num_labels, dropout_prob=0.1):
+        super(CombinedModelsDCCA, self).__init__()
         self.image_model = image_model
         self.bert_model = bert_model
-        self.adaptive_pool = nn.AdaptiveAvgPool2d(1)
         self.gem_pooling = GeMPooling()
 
+        self.latent_dim = latent_dim
 
+        # Image and text projection layers
+        self.image_projection = nn.Sequential(
+            nn.Linear(image_feature_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, latent_dim),
+        )
+
+        self.text_projection = nn.Sequential(
+            nn.Linear(bert_embedding_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, latent_dim),
+        )
+
+        # Classification layers
+        self.fc1 = nn.Linear(latent_dim * 2, 128)
+        self.fc2 = nn.Linear(128, num_labels)
         self.dropout = nn.Dropout(dropout_prob)
-        self.cross_attention = CrossAttentionLayer(query_dim=image_feature_dim, embed_dim = bert_embedding_dim, num_heads=4, dropout_prob=dropout_prob)
-        self.latent_dim = latent_dim  # The dimensionality of the shared space
-        self.cca = CCA(n_components=self.latent_dim)
 
-        # Fully connected layers for combining features
-        # self.fc = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
-        self.fc1 = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
-        self.fc2 = nn.Linear(combined_dim, combined_dim)
-        self.fc3 = nn.Linear(combined_dim, num_labels)
-
-        self.fc4 = nn.Linear(8, 8)
-        self.fc5 = nn.Linear(8,num_labels)
-        self.classifier = nn.Linear(combined_dim, num_labels)
+        # DCCA loss
+        self.dcca_loss = DCCALoss(latent_dim)
 
     def forward(self, pixel_values, bert_input_ids, bert_attention_mask, labels=None):
+        # Process image features
         image_outputs = self.image_model(pixel_values, output_hidden_states=True)
-
-        # image_features = image_outputs.hidden_states[-1].mean(dim=(1, 2))
         image_features = self.gem_pooling(image_outputs.hidden_states[-1])
+        image_features = image_features.view(image_features.size(0), -1)
 
-        # image_features = image_features.unsqueeze(1)  # Shape: (batch_size, 1, image_feature_dim)
-
+        # Process text (BERT) features
         bert_outputs = self.bert_model(
             input_ids=bert_input_ids,
             attention_mask=bert_attention_mask,
             output_hidden_states=True,
         )
-        # bert_embeddings = bert_outputs.last_hidden_state  # Shape: (batch_size, seq_len, bert_embedding_dim)
+        bert_embeddings = bert_outputs.last_hidden_state[:, 0, :]  # CLS token
 
-        bert_embeddings = bert_outputs.last_hidden_state[:, 0, :]  # Shape: (batch_size, bert_embedding_dim)
+        # Project to shared latent space
+        image_latent = self.image_projection(image_features)
+        text_latent = self.text_projection(bert_embeddings)
 
-        image_features_np = image_features.detach().cpu().numpy()
-        bert_embeddings_np = bert_embeddings.detach().cpu().numpy()
-        # print("Image Features Shape:", image_features_np.shape)
-        # print("BERT Embeddings Shape:", bert_embeddings_np.shape)
+        # Calculate DCCA loss if labels are provided
+        dcca_loss = None
+        if labels is not None:
+            dcca_loss = self.dcca_loss(image_latent, text_latent)
 
-        self.cca.fit(image_features_np, bert_embeddings_np)
+        # Concatenate and classify
+        combined_latent = torch.cat([image_latent, text_latent], dim=1)
+        combined_latent = self.dropout(F.relu(self.fc1(combined_latent)))
+        logits = self.fc2(combined_latent)
 
-        image_features_cca, bert_embeddings_cca = self.cca.transform(
-            image_features_np,
-            bert_embeddings_np,
-        )
-
-        # Convert transformed features back to torch tensors
-        image_features_cca = torch.tensor(image_features_cca, device=image_features.device)
-        bert_embeddings_cca = torch.tensor(bert_embeddings_cca, device=bert_embeddings.device)
-
-        # # Prepare image features as queries
-
-        # # Apply Cross-Attention (image features attend to text embeddings)
-        # attended_features = self.cross_attention(query=image_features, key=bert_embeddings, value=bert_embeddings)
-        # attended_features = attended_features.squeeze(1)  # Shape: (batch_size, bert_embedding_dim)
-
-        # # Concatenate attended features and image features
-        # combined_features = torch.cat([image_features.squeeze(1), attended_features], dim=1)
-        combined_features = torch.cat([image_features_cca, bert_embeddings_cca], dim=1)
-        combined_features = combined_features.float()
-
-        combined_features = self.dropout(combined_features)
-        # combined_output = F.relu(self.fc(combined_features))
-
-        combined_features = F.relu(self.fc4(combined_features))
-        combined_features = F.relu(self.fc4(combined_features) + combined_features)  # Residual connection
-        logits = self.fc5(combined_features)
-        # logits = self.classifier(combined_output)
-
-
-
-        return {"logits": logits}
+        return {"logits": logits, "dcca_loss": dcca_loss}
 
 
 

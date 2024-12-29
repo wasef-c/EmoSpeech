@@ -41,7 +41,8 @@ from IPython.display import display, clear_output
 from tqdm.auto import tqdm
 
 # Custom functions (from your own module)
-from functions_older import *
+# from functions_older import *
+from functions_old import *
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -52,7 +53,7 @@ pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_
 # # Load the state_dict
 # state_dict = torch.load(old_model)
 # model.load_state_dict(state_dict, strict=False)
-base_dir = "/media/carol/Data/Documents/Emo_rec/Notebooks/NLP_IMG/Ver1/DinatBert"
+base_dir = "/media/carol/Data/Documents/Emo_rec/Notebooks/NLP_IMG/Ver2/DinatBert"
 output_dir = create_unique_output_dir(base_dir)
 
 
@@ -69,16 +70,19 @@ combined_dim = 1024
 num_labels = 4
 
 # Load Dataset
-dataset_name = 'cairocode/IEMOCAP_IMG_NLP'
+dataset_name = 'cairocode/IEMO_Wav2Vec2'
 dataset = load_dataset(dataset_name)
 dataset  = dataset.filter(filter_m_examples)
-train_dataset = dataset['train']
-validation_dataset = dataset['validation']
-test_dataset = dataset['test']
+# train_dataset = dataset['train']
+# validation_dataset = dataset['validation']
+# test_dataset = dataset['test']
 
 # Concatenate the datasets
-combined_dataset = concatenate_datasets([train_dataset, validation_dataset, test_dataset])
 
+
+# combined_dataset = concatenate_datasets([train_dataset, validation_dataset, test_dataset])
+
+combined_dataset = dataset['train']
 os.makedirs(output_dir, exist_ok=True)
 
 
@@ -104,8 +108,8 @@ combined_dim = 1024
 num_labels = 4
 
 a = 1
-angry_weight = a
-happy_weight = 1
+angry_weight = 0.9
+happy_weight = 1.6
 neutral_weight = 1.2
 sad_weight = a
 
@@ -120,7 +124,7 @@ training_args = TrainingArguments(
     output_dir="./logs",
     evaluation_strategy="epoch",  # Evaluates at the end of each epoch
     save_strategy="epoch",        # Saves the model at the end of each epoch
-    learning_rate=1e-5,
+    learning_rate=1e-2,
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
     num_train_epochs=20,
@@ -150,13 +154,14 @@ for i in range (len(unique_speakers)):
     bert_model = BertModel.from_pretrained("bert-base-uncased")
 
     # Define the combined model
-    model = CombinedModelsNew(
+    model = CombinedModelsDCCA(
         image_model=image_model,
         bert_model=bert_model,
         image_feature_dim=512,  # Match old model dimensions
         bert_embedding_dim=768,
-        combined_dim=1024,  # Match the old combined_dim
+        # combined_dim=1024,  # Match the old combined_dim
         num_labels=4,  # Match the old number of labels
+        latent_dim = 16,
     )
 
 
@@ -167,7 +172,7 @@ for i in range (len(unique_speakers)):
 
 
 
-    speakers = [937+i] #    speakers = [937+i]
+    speakers = [1+i] #    speakers = [937+i]
     print(f"\n {'#'*120}")
     print(f"                                          STARTING SPEAKER {i}                                                      ")
     print(f"\n {'#'*120}")
@@ -216,13 +221,14 @@ for i in range (len(unique_speakers)):
 
     class_weights = calculate_class_weights(train_dataset, class_weight_multipliers)
     class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
-
-    model = CombinedModelsNew(
+    # class_weights = None
+    model = CombinedModelsDCCA(
     image_model=image_model,
     bert_model=bert_model,
     image_feature_dim=512,  # Match old model dimensions
     bert_embedding_dim=768,
-    combined_dim=1024,  # Match the old combined_dim
+    # combined_dim=1024,  # Match the old combined_dim
+    latent_dim = 16, 
     num_labels=4,  # Match the old number of labels
     )
 
@@ -238,11 +244,11 @@ for i in range (len(unique_speakers)):
         num_training_steps=num_training_steps
     )
 
-    class_weights = torch.tensor(class_weights).to(device)
+    # class_weights = torch.tensor(class_weights).to(device)
 
-    # focal_loss = FocalLoss(alpha=1, gamma=2, class_weights=class_weights)
+    focal_loss = FocalLoss(alpha=1, gamma=2, class_weights=class_weights)
     # focal_loss = AdaptiveLearnableFocalLoss(class_weights=class_weights, learnable = False)
-    focal_loss =  AdaptiveLearnableFocalLoss(class_weights=class_weights)
+    # focal_loss =  AdaptiveLearnableFocalLoss(class_weights=class_weights)
 
     # Initialize lists to store loss values
     train_losses = []
@@ -262,7 +268,7 @@ for i in range (len(unique_speakers)):
 
     # Directory to save the best model
     best_model_path = os.path.join(new_model_path,"best_model.pt")
-
+    j = 0
     # Training loop with Early Stopping
     for epoch in range(num_epochs):
         model.train()
@@ -274,16 +280,19 @@ for i in range (len(unique_speakers)):
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
 
         for batch in progress_bar:
+            j+=1
             pixel_values = batch["pixel_values"].to(device)
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask)
+            outputs = model(pixel_values=pixel_values, bert_input_ids=input_ids, bert_attention_mask=attention_mask, labels = labels)
 
             logits = outputs["logits"]
-
+            dcca_loss = outputs["dcca_loss"]
             combined_loss = focal_loss(logits, labels)  # Loss for combined features
+            alpha = 0.15 # Scale factor for DCCA loss
+            total_loss = combined_loss + alpha * dcca_loss
 
             optimizer_combined = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-5)
             
@@ -300,12 +309,12 @@ for i in range (len(unique_speakers)):
             predictions = torch.argmax(logits, dim=-1)
             all_trained_preds.extend(predictions.cpu().numpy())
 
-            # Class distribution every 50 batches
-            # if i % 50 == 0:
-            #     class_counts = Counter(all_trained_preds)
-            #     clean_class_counts = {int(k): v for k, v in class_counts.items()}
-            #     print("Predicted class distribution:", clean_class_counts)
-            #     all_trained_preds = []
+            # ## Class distribution every 50 batches
+            if j % 75 == 0:
+                class_counts = Counter(all_trained_preds)
+                clean_class_counts = {int(k): v for k, v in class_counts.items()}
+                print("Predicted class distribution:", clean_class_counts)
+                all_trained_preds = []
             
         print(f"Epoch {epoch+1}/{num_epochs} - Training Loss: {train_loss / len(train_loader):.4f}  ")#Img Loss: {img_train_loss / len(train_loader):.4f}  Bert Loss: {bert_train_loss / len(train_loader):.4f} ")
         lr_scheduler.step()
@@ -315,9 +324,13 @@ for i in range (len(unique_speakers)):
         val_loss = 0
         all_predictions = []
         all_labels = []
+        all_val_preds = []
+        j = 0
+
 
 
         with torch.no_grad():
+            j+=1
             for batch in val_loader:
                 pixel_values = batch["pixel_values"].to(device)
                 input_ids = batch["input_ids"].to(device)
@@ -340,6 +353,15 @@ for i in range (len(unique_speakers)):
                 predictions = torch.argmax(logits, dim=-1)
                 all_predictions.extend(predictions.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
+                all_val_preds.extend(predictions.cpu().numpy())
+
+
+                if j % 10 == 0:
+                    class_counts = Counter(all_val_preds)
+                    clean_class_counts = {int(k): v for k, v in class_counts.items()}
+                    # print(logits)
+                    print("Predicted class distribution:", clean_class_counts)
+                    all_val_preds = []
 
         # Calculate metrics
         avg_val_loss = val_loss / len(val_loader)
