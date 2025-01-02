@@ -18,7 +18,8 @@ from typing import Dict  # Add this import
 from transformers import AutoImageProcessor, DinatForImageClassification, TrainingArguments, Trainer, AutoTokenizer, AutoModel
 from sklearn.utils.class_weight import compute_class_weight
 
-image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224")
+image_processor = AutoImageProcessor.from_pretrained(
+    "google/vit-base-patch16-224")
 
 # Initialize the image processor and BERT tokenizer
 # image_processor = AutoImageProcessor.from_pretrained("shi-labs/dinat-mini-in1k-224")
@@ -33,11 +34,15 @@ global bert_model
 bert_model_name = "bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
 bert_model = AutoModel.from_pretrained(bert_model_name).to(device)
+
+
 def filter_m_examples(example):
-    return example["label"] != 4 and example["label"] != 5 
+    return example["label"] != 4 and example["label"] != 5
 
 # Data Transformations
 # Data Transformations
+
+
 def compute_bert_embeddings(transcripts):
     # Tokenize the transcripts and generate input_ids and attention_mask
     inputs = tokenizer(
@@ -50,7 +55,7 @@ def compute_bert_embeddings(transcripts):
     )
     # Move the inputs to the device (e.g., GPU if available)
     inputs = {key: value.to(device) for key, value in inputs.items()}
-    
+
     # Get the BERT embeddings without gradient computation
     with torch.no_grad():
         outputs = bert_model(**inputs)
@@ -69,25 +74,30 @@ def get_transforms(new_size=224):
     ])
 
 # Custom Collate Function
+
+
 def collate_fn(examples):
     """
     Custom collate function to handle batching of image data and BERT inputs.
     """
-    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(device)
-    input_ids = torch.stack([example["input_ids"] for example in examples]).to(device)
-    attention_mask = torch.stack([example["attention_mask"] for example in examples]).to(device)
-    labels = torch.tensor([example["label"] for example in examples]).to(device)
-    bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
-
+    pixel_values = torch.stack([example["pixel_values"]
+                               for example in examples]).to(device)
+    input_ids = torch.stack([example["input_ids"]
+                            for example in examples]).to(device)
+    attention_mask = torch.stack(
+        [example["attention_mask"] for example in examples]).to(device)
+    labels = torch.tensor([example["label"]
+                          for example in examples]).to(device)
+    bert_embeddings = torch.stack(
+        [example["bert_embeddings"] for example in examples]).to(device)
 
     return {
         "pixel_values": pixel_values,
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "labels": labels,
-        "bert_embeddings":bert_embeddings
+        "bert_embeddings": bert_embeddings
     }
-
 
 
 _test_transforms = Compose(
@@ -102,7 +112,8 @@ _test_transforms = Compose(
 
 
 def test_transforms(examples):
-    examples['pixel_values'] = [_test_transforms(image.convert("RGB")) for image in examples['image']]
+    examples['pixel_values'] = [_test_transforms(
+        image.convert("RGB")) for image in examples['image']]
     return examples
 
 
@@ -117,34 +128,39 @@ _val_transforms = Compose([
     ToTensor()
 ])
 
+
 def train_transforms(examples):
     # print("train transform: ", examples)
 
     # Use the image processor to process the images
     # processed_images = [image_processor(image.convert("RGB"))["pixel_values"].squeeze(0) for image in examples['image']]
-    processed_images = [_train_transforms(image.convert("RGB")) for image in examples['image']]
+    processed_images = [_train_transforms(
+        image.convert("RGB")) for image in examples['image']]
 
     # Use the BERT tokenizer for transcripts
     transcripts = examples['transcript']
-    bert_embeddings, attention_mask, input_ids= compute_bert_embeddings(transcripts)
+    bert_embeddings, attention_mask, input_ids = compute_bert_embeddings(
+        transcripts)
 
     examples['pixel_values'] = processed_images
     examples['bert_embeddings'] = bert_embeddings
     examples['attention_mask'] = attention_mask
     examples['input_ids'] = input_ids
 
-
     # print("after transform", examples)
     return examples
+
 
 def val_transforms(examples):
     # Use the image processor to process the images
     # processed_images = [image_processor(image.convert("RGB"), return_tensors="pt")["pixel_values"].squeeze(0) for image in examples['image']]
-    processed_images = [_train_transforms(image.convert("RGB")) for image in examples['image']]
+    processed_images = [_train_transforms(
+        image.convert("RGB")) for image in examples['image']]
 
     # Use the BERT tokenizer for transcripts
     transcripts = examples['transcript']
-    bert_embeddings, attention_mask, input_ids= compute_bert_embeddings(transcripts)
+    bert_embeddings, attention_mask, input_ids = compute_bert_embeddings(
+        transcripts)
 
     examples['pixel_values'] = processed_images
     examples['bert_embeddings'] = bert_embeddings
@@ -153,6 +169,8 @@ def val_transforms(examples):
     return examples
 
 # Custom Dataset and Sampler
+
+
 class CustomDataset(Dataset):
     def __init__(self, dataset):
         self.dataset = dataset
@@ -162,7 +180,7 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.dataset[idx]
-    
+
 
 class CustomSampler(Sampler):
     def __init__(self, data_source):
@@ -182,13 +200,13 @@ class CustomSampler(Sampler):
         # Shuffle the entire dataset initially
         shuffled_indices = list(range(self.num_samples))
         random.shuffle(shuffled_indices)
-        
+
         # Group the shuffled indices by speakerID
         self.group_indices = self._create_group_indices(shuffled_indices)
-        
+
         # Shuffle the groups
         random.shuffle(self.group_indices)
-        
+
         # Flatten indices after shuffling groups
         final_indices = [idx for group in self.group_indices for idx in group]
         return iter(final_indices)
@@ -196,15 +214,13 @@ class CustomSampler(Sampler):
     def __len__(self):
         return self.num_samples
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 '''
 (C)	Mohammad Haghighat, University of Miami
 %       haghighat@ieee.org
 %       PLEASE CITE THE ABOVE PAPER IF YOU USE THIS CODE.
 '''
+
 
 class CrossAttentionLayer(nn.Module):
     def __init__(self, query_dim, embed_dim, num_heads, dropout_prob=0.1):
@@ -213,7 +229,8 @@ class CrossAttentionLayer(nn.Module):
         self.key_proj = nn.Linear(embed_dim, embed_dim)
         self.value_proj = nn.Linear(embed_dim, embed_dim)
 
-        self.multihead_attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout_prob,  batch_first=True)
+        self.multihead_attn = nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=dropout_prob,  batch_first=True)
         self.layer_norm = nn.LayerNorm(embed_dim)
         self.dropout = nn.Dropout(dropout_prob)
 
@@ -223,11 +240,13 @@ class CrossAttentionLayer(nn.Module):
         key = self.key_proj(key)
         value = self.value_proj(value)
         # Apply multihead attention
-        attn_output, _ = self.multihead_attn(query, key, value, attn_mask=attention_mask)
+        attn_output, _ = self.multihead_attn(
+            query, key, value, attn_mask=attention_mask)
 
         # Residual connection and layer normalization
         output = self.layer_norm(query + self.dropout(attn_output))
         return output
+
 
 class GeMPooling(nn.Module):
     def __init__(self, p=3, eps=1e-6):
@@ -240,13 +259,15 @@ class GeMPooling(nn.Module):
         if x.dim() == 3:
             patch_dim = int((x.size(1) - 1) ** 0.5)  # Calculate grid size
             x = x[:, 1:, :]  # Remove classification token if present
-            x = x.view(x.size(0), patch_dim, patch_dim, x.size(2))  # Reshape to [batch_size, height, width, channels]
+            # Reshape to [batch_size, height, width, channels]
+            x = x.view(x.size(0), patch_dim, patch_dim, x.size(2))
 
         x = x.permute(0, 3, 1, 2)
         # Apply GeM pooling
-        pooled = torch.mean(x.clamp(min=self.eps).pow(self.p), dim=(2, 3)).pow(1.0 / self.p)
+        pooled = torch.mean(x.clamp(min=self.eps).pow(
+            self.p), dim=(2, 3)).pow(1.0 / self.p)
         return pooled
-    
+
 
 class CombinedModelsNew(nn.Module):
     def __init__(self, image_model, bert_model, image_feature_dim, bert_embedding_dim, combined_dim, num_labels, dropout_prob=0.1):
@@ -256,54 +277,57 @@ class CombinedModelsNew(nn.Module):
         self.adaptive_pool = nn.AdaptiveAvgPool2d(1)
         self.gem_pooling = GeMPooling()
 
-
         self.dropout = nn.Dropout(dropout_prob)
-        self.cross_attention = CrossAttentionLayer(query_dim=image_feature_dim, embed_dim = bert_embedding_dim, num_heads=4, dropout_prob=dropout_prob)
-
+        self.cross_attention = CrossAttentionLayer(
+            query_dim=image_feature_dim, embed_dim=bert_embedding_dim, num_heads=4, dropout_prob=dropout_prob)
 
         # Fully connected layers for combining features
         # self.fc = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
-        self.fc1 = nn.Linear(image_feature_dim + bert_embedding_dim, combined_dim)
+        self.fc1 = nn.Linear(image_feature_dim +
+                             bert_embedding_dim, combined_dim)
         self.fc2 = nn.Linear(combined_dim, combined_dim)
         self.fc3 = nn.Linear(combined_dim, num_labels)
-        
+
         self.classifier = nn.Linear(combined_dim, num_labels)
 
     def forward(self, pixel_values, bert_input_ids, bert_attention_mask, labels=None):
-        image_outputs = self.image_model(pixel_values, output_hidden_states=True)
+        image_outputs = self.image_model(
+            pixel_values, output_hidden_states=True)
 
         # image_features = image_outputs.hidden_states[-1].mean(dim=(1, 2))
         image_features = self.gem_pooling(image_outputs.hidden_states[-1])
-
 
         bert_outputs = self.bert_model(
             input_ids=bert_input_ids,
             attention_mask=bert_attention_mask,
             output_hidden_states=True,
         )
-        bert_embeddings = bert_outputs.last_hidden_state  # Shape: (batch_size, seq_len, bert_embedding_dim)
+        # Shape: (batch_size, seq_len, bert_embedding_dim)
+        bert_embeddings = bert_outputs.last_hidden_state
 
         # Prepare image features as queries
-        image_features = image_features.unsqueeze(1)  # Shape: (batch_size, 1, image_feature_dim)
+        # Shape: (batch_size, 1, image_feature_dim)
+        image_features = image_features.unsqueeze(1)
 
         # Apply Cross-Attention (image features attend to text embeddings)
-        attended_features = self.cross_attention(query=image_features, key=bert_embeddings, value=bert_embeddings)
-        attended_features = attended_features.squeeze(1)  # Shape: (batch_size, bert_embedding_dim)
+        attended_features = self.cross_attention(
+            query=image_features, key=bert_embeddings, value=bert_embeddings)
+        attended_features = attended_features.squeeze(
+            1)  # Shape: (batch_size, bert_embedding_dim)
 
         # Concatenate attended features and image features
-        combined_features = torch.cat([image_features.squeeze(1), attended_features], dim=1)
+        combined_features = torch.cat(
+            [image_features.squeeze(1), attended_features], dim=1)
         combined_features = self.dropout(combined_features)
         # combined_output = F.relu(self.fc(combined_features))
 
         combined_features = F.relu(self.fc1(combined_features))
-        combined_features = F.relu(self.fc2(combined_features) + combined_features)  # Residual connection
+        combined_features = F.relu(
+            self.fc2(combined_features) + combined_features)  # Residual connection
         logits = self.fc3(combined_features)
         # logits = self.classifier(combined_output)
 
-
-
         return {"logits": logits}
-
 
 
 # Custom Loss Function
@@ -316,20 +340,23 @@ class SuperLoss(nn.Module):
         self.class_weights = class_weights
 
     def forward(self, logits, targets):
-        l_i = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights).detach()
+        l_i = F.cross_entropy(logits, targets, reduction='none',
+                              weight=self.class_weights).detach()
         sigma = self.sigma(l_i)
-        loss = (F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights) - self.tau) * sigma
+        loss = (F.cross_entropy(logits, targets, reduction='none',
+                weight=self.class_weights) - self.tau) * sigma
         return loss.mean()
 
     def sigma(self, l_i):
         x = torch.ones_like(l_i) * (-2 / math.exp(1.))
         y = 0.5 * torch.max(x, (l_i - self.tau) / self.lam)
-        y = torch.clamp(y, min=-1.0, max=10.0) # MIGHT WANNA DELETE IDK
+        y = torch.clamp(y, min=-1.0, max=10.0)  # MIGHT WANNA DELETE IDK
 
         y = y.cpu().numpy()
         sigma = np.exp(-lambertw(y))
         sigma = torch.from_numpy(sigma.real.astype(np.float32)).to(l_i.device)
         return sigma
+
 
 class FocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2, class_weights=None):
@@ -340,17 +367,17 @@ class FocalLoss(nn.Module):
 
     def forward(self, logits, targets):
         # Compute Cross-Entropy Loss
-        ce_loss = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights)
-        
+        ce_loss = F.cross_entropy(
+            logits, targets, reduction='none', weight=self.class_weights)
+
         # Compute the probability of the true class
         pt = torch.exp(-ce_loss)
-        
+
         # Compute Focal Loss
         focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
-        
+
         # Return mean loss
         return focal_loss.mean()
-
 
 
 class AdaptiveLearnableFocalLoss(nn.Module):
@@ -359,8 +386,10 @@ class AdaptiveLearnableFocalLoss(nn.Module):
 
         # Learnable parameters for alpha and gamma
         if learnable:
-            self.alpha = nn.Parameter(torch.tensor(alpha_init, requires_grad=True))
-            self.gamma = nn.Parameter(torch.tensor(gamma_init, requires_grad=True))
+            self.alpha = nn.Parameter(
+                torch.tensor(alpha_init, requires_grad=True))
+            self.gamma = nn.Parameter(
+                torch.tensor(gamma_init, requires_grad=True))
         else:
             self.alpha = torch.tensor(alpha_init)
             self.gamma = torch.tensor(gamma_init)
@@ -369,11 +398,13 @@ class AdaptiveLearnableFocalLoss(nn.Module):
         self.class_weights = class_weights
 
         # Adaptive weighting factor for focal and class-weighted loss
-        self.adaptive_factor = nn.Parameter(torch.tensor(0.5, requires_grad=True))
+        self.adaptive_factor = nn.Parameter(
+            torch.tensor(0.5, requires_grad=True))
 
     def forward(self, logits, targets):
         # Compute Cross-Entropy Loss with class weights
-        ce_loss = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights.to(logits.device))
+        ce_loss = F.cross_entropy(
+            logits, targets, reduction='none', weight=self.class_weights.to(logits.device))
 
         # Compute probability of the true class (pt)
         pt = torch.exp(-ce_loss)
@@ -383,7 +414,8 @@ class AdaptiveLearnableFocalLoss(nn.Module):
         focal_loss = self.alpha * focal_term * ce_loss
 
         # Adaptive weighting between focal loss and cross-entropy loss
-        combined_loss = self.adaptive_factor * focal_loss + (1 - self.adaptive_factor) * ce_loss
+        combined_loss = self.adaptive_factor * \
+            focal_loss + (1 - self.adaptive_factor) * ce_loss
 
         return combined_loss.mean()
 
@@ -402,14 +434,15 @@ def compute_metrics(eval_pred):
 def calculate_class_weights(train_dataset, class_weight_multipliers):
     labels = [sample['label'] for sample in train_dataset]
     unique_classes = np.unique(labels)
-    class_weights = compute_class_weight('balanced', classes=unique_classes, y=labels)
-    
+    class_weights = compute_class_weight(
+        'balanced', classes=unique_classes, y=labels)
+
     class_weight_dict = dict(zip(unique_classes, class_weights))
-    
+
     for class_label, multiplier in class_weight_multipliers.items():
         if class_label in class_weight_dict:
             class_weight_dict[class_label] *= multiplier
-    
+
     return [class_weight_dict[label] for label in unique_classes]
 
 
@@ -430,7 +463,7 @@ def save_training_metadata(
     sad_weight,
     weight_decay,
     results
-    ):
+):
     """
     Save training metadata to a text file in the specified output directory.
     """
@@ -468,10 +501,10 @@ def save_training_metadata(
 def create_unique_output_dir(base_output_dir: str) -> str:
     """
     Creates a unique output directory appended with the current date and an incremented identifier.
-    
+
     Args:
         base_output_dir (str): The base directory where the new folder should be created.
-        
+
     Returns:
         str: The path of the newly created unique output directory.
     """

@@ -189,18 +189,19 @@ def process_files(df, image_dir, csv_dir, ds=0):
                 existing_files.add(row['file_name'])
     j = 0
 
-    with open(csv_file, 'a', newline='') as csvfile:
-        fieldnames = ['file_name', 'label', 'speaker']
+    with open(csv_file, 'a', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['file_name', 'file', 'transcript']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         if os.path.getsize(csv_file) == 0:
             writer.writeheader()
 
         for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing audio files"):
-            file_path = row['filename']
-            file_name = row['fname']
-            label_val = row['label']
-            speaker = row['speaker']
+            file_path = os.path.join(
+                r"D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test", row['file_name'])
+            file_name = row['file_name']
+            label_val = row['file']
+            speaker = row['transcript']
             if ds == 0:
                 fname = str(file_name.split('.wav')[0])
 
@@ -237,7 +238,7 @@ def process_files(df, image_dir, csv_dir, ds=0):
             img.save(full_path)
             # print('image saved to', full_path)
             writer.writerow(
-                {'file_name': jpname, 'label': label_val, 'speaker': speaker})
+                {'file_name': jpname, 'file': label_val, 'transcript': speaker})
 
 
 # Display available datasets
@@ -451,11 +452,11 @@ elif dataset_choice == 10:
 elif dataset_choice == 11:
     print('--------------MSP_POD DATASET STARTED ---- ')
 
-    file_path = '/media/carol/Data/Documents/Emo_rec/CSV_FILES/MSPpod_data.csv'
+    file_path = r'D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test\metadata.csv'
     df = pd.read_csv(file_path)
 
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/MSP_POD_MEL/images'
+    image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\test_old_set'
     os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/MSP_POD_MEL'
+    csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\test_old_set'
     os.makedirs(csv_dir, exist_ok=True)
     process_files(df, image_dir, csv_dir, 0)
