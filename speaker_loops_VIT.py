@@ -83,7 +83,7 @@ combined_dataset = dataset['train']
 os.makedirs(output_dir, exist_ok=True)
 
 
-BATCH_SIZE = 20
+BATCH_SIZE = 48
 
 spkrs = [sample['speakerID'] for sample in combined_dataset]
 unique_speakers = list(set(spkrs))
@@ -109,8 +109,8 @@ num_labels = 4
 a = 1
 angry_weight = a
 happy_weight = 1
-neutral_weight = 1.3
-sad_weight = a
+neutral_weight = 1.2
+sad_weight = 1.2
 
 class_weight_multipliers = {
     0: neutral_weight,

@@ -15,7 +15,7 @@ from transformers import (
     AutoImageProcessor,
     DinatForImageClassification,
     TrainingArguments,
-    Trainer,
+    Trainer, 
     get_scheduler,
     BertModel,
     ViTForImageClassification,
@@ -70,7 +70,7 @@ bert_embedding_dim = 768
 combined_dim = 1024
 
 # Load Dataset
-dataset_name = 'cairocode/MSPP_WAV2Vec2'
+dataset_name = 'cairocode/MSPP_POD_wav2vec3'
 dataset = load_dataset(dataset_name)
 
 
@@ -114,7 +114,7 @@ unique_speakers = list(set(spkrs))
 # processor = DinatForImageClassification.from_pretrained(model_path).to(device)
 
 image_model = ViTForImageClassification.from_pretrained(
-    "google/vit-base-patch16-224", num_labels=4,  ignore_mismatched_sizes=True, problem_type='single_label_classification').to(device)
+    "google/vit-base-patch16-224", num_labels=num_labels,  ignore_mismatched_sizes=True, problem_type='single_label_classification').to(device)
 
 bert_model_name = "bert-base-uncased"
 # bert_model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
@@ -177,7 +177,7 @@ bert_model = BertModel.from_pretrained("bert-base-uncased")
 
 processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224")
 image_model = ViTForImageClassification.from_pretrained(
-    "google/vit-base-patch16-224", num_labels=4,  ignore_mismatched_sizes=True, problem_type='single_label_classification').to(device)
+    "google/vit-base-patch16-224", num_labels=num_labels,  ignore_mismatched_sizes=True, problem_type='single_label_classification').to(device)
 bert_model = BertModel.from_pretrained("bert-base-uncased")
 
 
@@ -200,7 +200,7 @@ patience_counter = 0
 
 print(f"\n {'#'*120}")
 
-new_model_path = os.path.join(output_dir, 1)
+new_model_path = os.path.join(output_dir, "ver1")
 os.makedirs(new_model_path, exist_ok=True)
 
 
