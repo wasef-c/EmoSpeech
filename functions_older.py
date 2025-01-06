@@ -190,7 +190,7 @@ class CustomSampler(Sampler):
     def _create_group_indices(self, shuffled_indices):
         group_indices = {}
         for idx in shuffled_indices:
-            speaker_id = self.data_source[idx]['speakerID']
+            speaker_id = self.data_source[idx]['SpkrID']
             if speaker_id not in group_indices:
                 group_indices[speaker_id] = []
             group_indices[speaker_id].append(idx)
@@ -201,7 +201,7 @@ class CustomSampler(Sampler):
         shuffled_indices = list(range(self.num_samples))
         random.shuffle(shuffled_indices)
 
-        # Group the shuffled indices by speakerID
+        # Group the shuffled indices by SpkrID
         self.group_indices = self._create_group_indices(shuffled_indices)
 
         # Shuffle the groups
@@ -431,19 +431,20 @@ def compute_metrics(eval_pred):
     return {'accuracy': accuracy, 'uar': uar, 'f1': f1, 'top_k_acc': kacc}
 
 
-def calculate_class_weights(train_dataset, class_weight_multipliers):
+def calculate_class_weights(train_dataset, class_weight_multipliers=None):
     labels = [sample['label'] for sample in train_dataset]
     unique_classes = np.unique(labels)
-    class_weights = compute_class_weight(
-        'balanced', classes=unique_classes, y=labels)
-
+    class_weights = compute_class_weight('balanced', classes=unique_classes, y=labels)
+    
     class_weight_dict = dict(zip(unique_classes, class_weights))
-
-    for class_label, multiplier in class_weight_multipliers.items():
-        if class_label in class_weight_dict:
-            class_weight_dict[class_label] *= multiplier
-
+    if class_weight_multipliers != None:
+        for class_label, multiplier in class_weight_multipliers.items():
+            if class_label in class_weight_dict:
+                class_weight_dict[class_label] *= multiplier
+    
     return [class_weight_dict[label] for label in unique_classes]
+
+
 
 
 def save_training_metadata(

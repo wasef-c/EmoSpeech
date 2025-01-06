@@ -63,8 +63,6 @@ DATASET_PATH = "../data"
 CHECKPOINT_PATH = "./NLPIMG_Model_001"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model_path = 'shi-labs/dinat-mini-in1k-224'
-pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_PRE/REGRESSION/GSAV/model"
-# pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/IEMOCAP/Pre_SD_wtd_006/model"
 
 bert_embedding_dim = 768
 combined_dim = 1024
@@ -73,9 +71,10 @@ combined_dim = 1024
 dataset_name = 'cairocode/MSPP_POD_wav2vec3'
 dataset = load_dataset(dataset_name)
 
+dataset = dataset['train']
 
 # 2. Gather all unique values in the "category" column (for the 'train' split as an example)
-unique_values = set(dataset['train']['EmoClass'])
+unique_values = set(dataset['EmoClass'])
 
 # 3. Filter out the "X" value
 unique_values = [val for val in unique_values if val != 'X']
@@ -101,7 +100,7 @@ mapped_dataset = filtered_dataset.map(encode_category)
 print("Mapping of categories to integers:", mapping)
 
 
-combined_dataset = mapped_dataset['train']
+combined_dataset = mapped_dataset
 os.makedirs(output_dir, exist_ok=True)
 
 
@@ -205,18 +204,24 @@ os.makedirs(new_model_path, exist_ok=True)
 
 
 # 1. Extract all unique speaker IDs in the dataset.
-unique_speakers = dataset.unique("speaker_id")
+unique_speakers = dataset.unique("SpkrID")
 
 # 2. Randomly sample 20% of these unique speakers.
 test_speaker_count = int(0.2 * len(unique_speakers))  # 20%
-test_speakers = set(random.sample(unique_speakers, test_speaker_count))
+
+# Set a specific seed for reproducibility
+random.seed(42)
+
+# Convert the set to a list before sampling
+test_speakers = set(random.sample(list(unique_speakers), test_speaker_count))
+
 
 # 3. Filter the original dataset into test set and train set
 #    based on whether the speaker_id is in the chosen test_speakers.
 test_dataset = dataset.filter(
-    lambda example: example["speaker_id"] in test_speakers)
+    lambda example: example["SpkrID"] in test_speakers)
 training_set = dataset.filter(
-    lambda example: example["speaker_id"] not in test_speakers)
+    lambda example: example["SpkrID"] not in test_speakers)
 split_dataset = training_set.train_test_split(test_size=0.2, seed=42)
 
 train_dataset = split_dataset["train"]
@@ -257,7 +262,7 @@ test_loader = DataLoader(
 )
 
 class_weights = calculate_class_weights(
-    train_dataset)
+    train_dataset, class_weight_multipliers = [1,1,1,1,1,1,1,1,1])
 class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 
 model = CombinedModelsNew(
