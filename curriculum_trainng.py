@@ -57,7 +57,7 @@ logging.getLogger().addHandler(logging.NullHandler())
 logging.getLogger("natten.functional").setLevel(logging.ERROR)
 
 # Paths and configuration
-base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\VIT_BERT\MSP_POD"
+base_dir = r"./Curriculum/Gender"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
@@ -67,6 +67,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 50
 bert_embedding_dim = 768
 combined_dim = 1024
+column = "Gender"
 
 # Pre-trained model references (ViT + BERT)
 image_model_name = "google/vit-base-patch16-224"
@@ -76,20 +77,20 @@ bert_model_name = "bert-base-uncased"
 dataset_name = 'cairocode/MSPP_Wav2Vec_4'
 dataset = load_dataset(dataset_name)["train"]
 
-unique_values = set(dataset["EmoClass"])
+# Filter out and map label "X" -> remove it
+unique_values = set(dataset[column])
 unique_values = [val for val in unique_values if val != "X"]
 num_labels = len(unique_values)
 label_mapping = {val: i for i, val in enumerate(unique_values)}
 
 # Filter out rows where "EmoClass" == "X"
-dataset = dataset.filter(lambda example: example["EmoClass"] != "X")
+dataset = dataset.filter(lambda example: example[column] != "X")
 
 # Map label strings to integer IDs
 def encode_category(example):
-    example["label"] = label_mapping[example["EmoClass"]]
+    example["label"] = label_mapping[example[column]]
     return example
 
-dataset = dataset.map(encode_category)
 
 print("Mapping of categories to integers:", label_mapping)
 
@@ -155,16 +156,7 @@ tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
 bert_model = BertModel.from_pretrained(bert_model_name).to(device)
 
 # Combined model
-# model = CombinedModelsNew(
-#     image_model=image_model,
-#     bert_model=bert_model,
-#     image_feature_dim=768,   # Feature dim of ViT
-#     bert_embedding_dim=768,  # BERT embedding dim
-#     combined_dim=1024,       # Combined dimension
-#     num_labels=num_labels
-# ).to(device)
-
-model = CombinedModelsBi(
+model = CombinedModelsNew(
     image_model=image_model,
     bert_model=bert_model,
     image_feature_dim=768,   # Feature dim of ViT
@@ -172,7 +164,6 @@ model = CombinedModelsBi(
     combined_dim=1024,       # Combined dimension
     num_labels=num_labels
 ).to(device)
-
 
 # Training configuration
 training_args = TrainingArguments(
@@ -386,11 +377,11 @@ save_training_metadata(
     output_dir=output_dir,
     pathstr=image_model_name,
     dataset_name=dataset_name,
-    model_type="CombinedModelBi",
+    model_type="CombinedModel",
     super_loss_params="N/A",
     speaker_disentanglement=True,
     entropy=False,
-    column="label",
+    column=column,
     metrics=metrics,
     speakers="N/A",
     angry_weight=label_mapping,  # Adjust if you used weighting per class
@@ -407,4 +398,3 @@ with open(metrics_file, "w") as f:
     f.write(metrics + "\n")
 
 print(f"Metrics saved to {metrics_file}")
-
