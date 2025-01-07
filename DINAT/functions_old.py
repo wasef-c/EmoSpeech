@@ -84,6 +84,7 @@ def collate_fn(examples):
     bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
 
 
+
     return {
         "pixel_values": pixel_values,
         "input_ids": input_ids,
@@ -176,7 +177,7 @@ class CustomSampler(Sampler):
     def _create_group_indices(self, shuffled_indices):
         group_indices = {}
         for idx in shuffled_indices:
-            speaker_id = self.data_source[idx]['speakerID']
+            speaker_id = self.data_source[idx]['SpkrID']
             if speaker_id not in group_indices:
                 group_indices[speaker_id] = []
             group_indices[speaker_id].append(idx)
@@ -456,16 +457,16 @@ def compute_metrics(eval_pred):
     return {'accuracy': accuracy, 'uar': uar, 'f1': f1, 'top_k_acc': kacc}
 
 
-def calculate_class_weights(train_dataset, class_weight_multipliers):
+def calculate_class_weights(train_dataset, class_weight_multipliers=None):
     labels = [sample['label'] for sample in train_dataset]
     unique_classes = np.unique(labels)
     class_weights = compute_class_weight('balanced', classes=unique_classes, y=labels)
     
     class_weight_dict = dict(zip(unique_classes, class_weights))
-    
-    for class_label, multiplier in class_weight_multipliers.items():
-        if class_label in class_weight_dict:
-            class_weight_dict[class_label] *= multiplier
+    if class_weight_multipliers != None:
+        for class_label, multiplier in class_weight_multipliers.items():
+            if class_label in class_weight_dict:
+                class_weight_dict[class_label] *= multiplier
     
     return [class_weight_dict[label] for label in unique_classes]
 
@@ -480,13 +481,12 @@ def save_training_metadata(
     entropy,
     column,
     metrics,
-    speakers,
-    angry_weight,
-    happy_weight,
-    neutral_weight,
-    sad_weight,
     weight_decay,
-    results
+    results, 
+    class_weights=None,
+    speakers = None,
+
+
     ):
     """
     Save training metadata to a text file in the specified output directory.
@@ -512,10 +512,7 @@ def save_training_metadata(
         file.write(f"Column Trained on: {column}\n")
         file.write(f"Test Results: {metrics}\n")
         file.write(f"Test Speaker IDs: {speakers}\n")
-        file.write(f"Angry Weight: {angry_weight}\n")
-        file.write(f"Happy Weight: {happy_weight}\n")
-        file.write(f"Neutral Weight: {neutral_weight}\n")
-        file.write(f"Sad Weight: {sad_weight}\n")
+        file.write(f"Class Weights: {class_weights}\n")
         file.write(f"Weight Decay: {weight_decay}\n")
         file.write(f"Test results {results}\n")
 

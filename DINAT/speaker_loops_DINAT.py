@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
-
+print("hello\n---------------------")
 # Hugging Face Transformers
 from transformers import (
     AutoImageProcessor,
@@ -53,7 +53,7 @@ pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_
 # # Load the state_dict
 # state_dict = torch.load(old_model)
 # model.load_state_dict(state_dict, strict=False)
-base_dir = "/media/carol/Data/Documents/Emo_rec/Notebooks/NLP_IMG/Ver2/DinatBert"
+base_dir = "/media/carol/Data/Documents/Emo_rec/Notebooks/DINAT_BERT/MSP_POD"
 output_dir = create_unique_output_dir(base_dir)
 
 
@@ -70,8 +70,31 @@ combined_dim = 1024
 num_labels = 4
 
 # Load Dataset
-dataset_name = 'cairocode/IEMO_Wav2Vec2'
+dataset_name = 'cairocode/MSP_POD_NLP'
 dataset = load_dataset(dataset_name)
+
+# 2. Gather all unique values in the "category" column (for the 'train' split as an example)
+unique_values = set(dataset['train']['category'])
+
+# 3. Filter out the "X" value
+unique_values = [val for val in unique_values if val != 'X']
+
+# 4. Create a mapping (dictionary) from category strings to integer IDs
+mapping = {val: i for i, val in enumerate(unique_values)}
+
+# 5. Filter out rows where "category" == "X" in the dataset
+filtered_dataset = dataset.filter(lambda example: example["category"] != "X")
+
+# 6. Apply the mapping to the "category" column
+def encode_category(example):
+    example["category"] = mapping[example["category"]]
+    return example
+
+mapped_dataset = filtered_dataset.map(encode_category)
+
+# 7. Print out the mapping for reference
+print("Mapping of categories to integers:", mapping)
+
 dataset  = dataset.filter(filter_m_examples)
 # train_dataset = dataset['train']
 # validation_dataset = dataset['validation']
