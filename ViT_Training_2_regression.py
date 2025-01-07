@@ -30,9 +30,13 @@ logging.getLogger().addHandler(logging.NullHandler())
 # ----------------------------------------------------------------------
 # Configuration and Paths
 # ----------------------------------------------------------------------
-base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\VIT_BERT\MSP_POD"
+checkpoint_path = "./Curriculum/Speaker/20250106_10/best_model.pt"
+base_dir = r"./Curriculum/Regression/Activation"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
+
+
+column = "EmoAct"  # or "arousal", "score", etc.
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -49,26 +53,30 @@ bert_model_name = "bert-base-uncased"
 # ----------------------------------------------------------------------
 # Load Dataset
 # ----------------------------------------------------------------------
-dataset_name = 'cairocode/MSPP_POD_wav2vec3'
+dataset_name = 'cairocode/MSPP_Wav2Vec_4'
 dataset = load_dataset(dataset_name)["train"]
 
 # Example filter for valid transcript
+
+
 def has_valid_transcript(example):
     return example["transcript"] is not None
+
 
 dataset = dataset.filter(has_valid_transcript)
 
 # For demonstration, let's define:
-column = "valence"  # or "arousal", "score", etc.
 
 # 1) Rename the chosen column to "label"
+
+
 def rename_to_label(example):
     # Convert to float if necessary
     return {"label": float(example[column])}
 
+
 # 2) Map the transformation
 dataset = dataset.map(rename_to_label)
-
 
 
 # If you have a numeric column for regression, map it to "label".
@@ -125,7 +133,9 @@ test_loader = DataLoader(
 image_processor = AutoImageProcessor.from_pretrained(image_model_name)
 base_image_model = ViTForImageClassification.from_pretrained(
     image_model_name,
-    ignore_mismatched_sizes=True,  # We'll use the hidden states, ignoring the classifier head
+    ignore_mismatched_sizes=True,
+    num_labels=1,
+    problem_type="regression"
 ).to(device)
 
 tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
@@ -143,10 +153,34 @@ model = CombinedModelsNewRegression(
     output_dim=1            # Single-value regression output
 ).to(device)
 
+
+checkpoint = torch.load(checkpoint_path, map_location=device)
+
+# Keys to exclude from loading
+excluded_keys = [
+    "image_model.classifier.weight",
+    "image_model.classifier.bias",
+    "fc3.weight",
+    "fc3.bias",
+    "classifier.weight",
+    "classifier.bias",
+]
+
+# Filter out the excluded keys
+filtered_checkpoint = {k: v for k,
+                       v in checkpoint.items() if k not in excluded_keys}
+
+# Load the filtered state dict
+model.load_state_dict(filtered_checkpoint, strict=False)
+
+print("Filtered keys excluded from loading:", excluded_keys)
+
+
 # ----------------------------------------------------------------------
 # Training Setup
 # ----------------------------------------------------------------------
-optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+optimizer = optim.AdamW(
+    model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 num_training_steps = len(train_loader) * EPOCHS
 lr_scheduler = get_scheduler(
     "linear",
@@ -171,7 +205,8 @@ best_model_path = os.path.join(output_dir, "best_model.pt")
 for epoch in range(EPOCHS):
     model.train()
     train_loss = 0.0
-    progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}", leave=False)
+    progress_bar = tqdm(
+        train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}", leave=False)
 
     for batch in progress_bar:
         pixel_values = batch["pixel_values"].to(device)
@@ -186,7 +221,7 @@ for epoch in range(EPOCHS):
             bert_input_ids=input_ids,
             bert_attention_mask=attention_mask
         )
-        # Your model returns {"outputs": <tensor>} 
+        # Your model returns {"outputs": <tensor>}
         # shape: [batch_size, 1]
         predictions = outputs_dict["outputs"].squeeze(-1)
 
