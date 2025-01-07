@@ -39,6 +39,7 @@ import seaborn as sns
 from tqdm.auto import tqdm
 
 # Custom functions (assume these are defined in `functions_older.py`)
+
 from functions_older import (
     create_unique_output_dir,
     CombinedModelsNew,
@@ -57,7 +58,7 @@ logging.getLogger().addHandler(logging.NullHandler())
 logging.getLogger("natten.functional").setLevel(logging.ERROR)
 
 # Paths and configuration
-base_dir = r"./Curriculum/Gender"
+base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\Currciulum_Models/Speaker"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
@@ -67,7 +68,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 50
 bert_embedding_dim = 768
 combined_dim = 1024
-column = "Gender"
+column = "SpkrID"
+
+# Path to the checkpoint file
+checkpoint_path = r"G:\My Drive\checkpoint\gender_best_model.pt"
 
 # Pre-trained model references (ViT + BERT)
 image_model_name = "google/vit-base-patch16-224"
@@ -79,42 +83,40 @@ dataset = load_dataset(dataset_name)["train"]
 
 # Filter out and map label "X" -> remove it
 unique_values = set(dataset[column])
-unique_values = [val for val in unique_values if val != "X"]
+
 num_labels = len(unique_values)
 label_mapping = {val: i for i, val in enumerate(unique_values)}
 
-# Filter out rows where "EmoClass" == "X"
-dataset = dataset.filter(lambda example: example[column] != "X")
 
 # Map label strings to integer IDs
 def encode_category(example):
     example["label"] = label_mapping[example[column]]
     return example
 
+dataset = dataset.map(encode_category)
 
 print("Mapping of categories to integers:", label_mapping)
 
 # Split by speaker (speaker-disjoint test set)
-unique_speakers = list(set(dataset["SpkrID"]))
-test_speaker_count = int(0.2 * len(unique_speakers))
-random.seed(42)
-test_speakers = set(random.sample(unique_speakers, test_speaker_count))
+# unique_speakers = list(set(dataset["SpkrID"]))
+# test_speaker_count = int(0.2 * len(unique_speakers))
+# random.seed(42)
+# test_speakers = set(random.sample(unique_speakers, test_speaker_count))
 
-test_dataset = dataset.filter(lambda x: x["SpkrID"] in test_speakers)
-training_set = dataset.filter(lambda x: x["SpkrID"] not in test_speakers)
-split_dataset = training_set.train_test_split(test_size=0.2, seed=42)
+# test_dataset = dataset.filter(lambda x: x["SpkrID"] in test_speakers)
+# training_set = dataset.filter(lambda x: x["SpkrID"] not in test_speakers)
 
+# split_dataset = training_set.train_test_split(test_size=0.2, seed=42)
+
+
+split_dataset = dataset.train_test_split(test_size=0.25, seed=42)
 train_dataset = split_dataset["train"]
 val_dataset = split_dataset["test"]
-
-print("Number of unique speakers:", len(unique_speakers))
-print("Test speaker count:", len(test_speakers))
-print("Test dataset size:", len(test_dataset))
+test_dataset = val_dataset
+# print("Number of unique speakers:", len(unique_speakers))
+# print("Test speaker count:", len(test_speakers))
+# print("Test dataset size:", len(test_dataset))
 print("Train dataset size:", len(train_dataset))
-# Quick check for row types:
-for i, row in enumerate(train_dataset):
-    if not isinstance(row["transcript"], str):
-        print(f"Row {i} has type {type(row['transcript'])} for 'transcript'")
 
 # Set transforms
 train_dataset.set_transform(train_transforms)
@@ -124,7 +126,7 @@ test_dataset.set_transform(val_transforms)
 # Dataloaders
 train_loader = DataLoader(
     train_dataset,
-    sampler=CustomSampler(train_dataset),
+    # sampler=CustomSampler(train_dataset),
     batch_size=BATCH_SIZE,
     collate_fn=collate_fn,
 )
@@ -140,8 +142,8 @@ test_loader = DataLoader(
 )
 
 # Calculate and apply class weights (example multipliers)
-class_weights = calculate_class_weights(train_dataset)
-class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
+# class_weights = calculate_class_weights(train_dataset)
+# class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 
 # Initialize models
 processor = AutoImageProcessor.from_pretrained(image_model_name)
@@ -164,6 +166,32 @@ model = CombinedModelsNew(
     combined_dim=1024,       # Combined dimension
     num_labels=num_labels
 ).to(device)
+
+
+checkpoint = torch.load(checkpoint_path, map_location=device)
+
+# Keys to exclude from loading
+excluded_keys = [
+    "image_model.classifier.weight",
+    "image_model.classifier.bias",
+    "fc3.weight",
+    "fc3.bias",
+    "classifier.weight",
+    "classifier.bias",
+]
+
+# Filter out the excluded keys
+filtered_checkpoint = {k: v for k, v in checkpoint.items() if k not in excluded_keys}
+
+# Load the filtered state dict
+model.load_state_dict(filtered_checkpoint, strict=False)
+
+print("Filtered keys excluded from loading:", excluded_keys)
+
+# If you saved optimizer state or other variables, you can load them too
+# optimizer.load_state_dict
+
+
 
 # Training configuration
 training_args = TrainingArguments(
@@ -194,7 +222,7 @@ lr_scheduler = get_scheduler(
 )
 
 # Focal loss
-focal_loss = AdaptiveLearnableFocalLoss(class_weights=class_weights)
+focal_loss = AdaptiveLearnableFocalLoss(class_weights=None)
 
 # Early stopping
 num_epochs = training_args.num_train_epochs

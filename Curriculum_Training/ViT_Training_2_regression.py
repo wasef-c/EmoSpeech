@@ -34,7 +34,7 @@ logging.getLogger().addHandler(logging.NullHandler())
 # ----------------------------------------------------------------------
 # Configuration and Paths
 # ----------------------------------------------------------------------
-checkpoint_path = "./Curriculum/Speaker/20250106_10/best_model.pt"
+checkpoint_path = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\Currciulum_Models\Speaker\20250107_6\best_model.pt"
 base_dir = r"./Curriculum/Regression/Activation"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
@@ -135,7 +135,7 @@ test_loader = DataLoader(
 # Initialize Image + Text Models
 # ----------------------------------------------------------------------
 image_processor = AutoImageProcessor.from_pretrained(image_model_name)
-base_image_model = ViTForImageClassification.from_pretrained(
+image_model = ViTForImageClassification.from_pretrained(
     image_model_name,
     ignore_mismatched_sizes=True,
     num_labels=1,
@@ -148,36 +148,45 @@ base_bert_model = BertModel.from_pretrained(bert_model_name).to(device)
 # ----------------------------------------------------------------------
 # Initialize the Combined Regression Model
 # ----------------------------------------------------------------------
-model = CombinedModelsNewRegression(
-    image_model=base_image_model,
-    bert_model=base_bert_model,
-    image_feature_dim=768,   # Feature dimension from ViT
-    bert_embedding_dim=768,  # BERT embedding dimension
+model = CombinedModelsBi(
+    image_model=image_model,
+    bert_model=bert_model,
+    image_feature_dim=768,   # Feature dim of ViT
+    bert_embedding_dim=768,  # BERT embedding dim
     combined_dim=1024,       # Combined dimension
-    output_dim=1            # Single-value regression output
+    num_labels=1
 ).to(device)
+
 
 
 checkpoint = torch.load(checkpoint_path, map_location=device)
 
-# Keys to exclude from loading
-excluded_keys = [
-    "image_model.classifier.weight",
-    "image_model.classifier.bias",
-    "fc3.weight",
-    "fc3.bias",
-    "classifier.weight",
-    "classifier.bias",
-]
+# Option 1: Print each key on a separate line
+# for key in checkpoint.keys():
+#     print(key)
 
-# Filter out the excluded keys
-filtered_checkpoint = {k: v for k,
-                       v in checkpoint.items() if k not in excluded_keys}
+
+# Define the keywords to include and exclude
+include_keyword = "image_model"
+exclude_keys = {
+    "image_model.classifier.weight",
+    "image_model.classifier.bias"
+}
+
+# Use dictionary comprehension to filter the keys
+filtered_checkpoint = {
+    key: value for key, value in checkpoint.items()
+    if include_keyword in key and key not in exclude_keys
+}
+
+# Optional: Verify the filtered keys
+print("Filtered keys to be loaded:")
+for key in filtered_checkpoint.keys():
+    print(f"- {key}")
+
 
 # Load the filtered state dict
 model.load_state_dict(filtered_checkpoint, strict=False)
-
-print("Filtered keys excluded from loading:", excluded_keys)
 
 
 # ----------------------------------------------------------------------
