@@ -294,7 +294,7 @@ class BiCrossAttentionLayer(nn.Module):
         attn_out_12, _ = self.attn_12(q_12, k_12, v_12, attn_mask=mask1)
         # Residual + LayerNorm
         updated_x1 = self.layer_norm_12(q_12 + self.dropout_12(attn_out_12))
-        print("q_12 in_features:", x1.shape[-1], "vs. query_proj_12 weight shape:", self.query_proj_12.weight.shape)
+        # print("q_12 in_features:", x1.shape[-1], "vs. query_proj_12 weight shape:", self.query_proj_12.weight.shape)
 
         # --------------------------------------------------
         # 2) x2 -> x1 cross-attention
@@ -398,9 +398,7 @@ class CombinedModelsBi(nn.Module):
         #    updated_image: (B, 1, embed_dim)
         #    updated_text:  (B, seq_len, embed_dim)
         # --------------------------------------------
-        print("x1 shape:", image_features.shape)  # should be (batch, seq_len1, dim1)
-        print("x2 shape:", bert_embeddings.shape)  # should be (batch, seq_len2, dim2)
-
+       
         updated_image, updated_text = self.bi_cross_attn(
             x1=image_features,      # shape (B, 1, image_feature_dim)
             x2=bert_embeddings      # shape (B, seq_len, bert_embedding_dim)

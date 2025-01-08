@@ -236,7 +236,7 @@ for epoch in range(EPOCHS):
         )
         # Your model returns {"outputs": <tensor>}
         # shape: [batch_size, 1]
-        predictions = outputs_dict["outputs"].squeeze(-1)
+        predictions = outputs_dict["logits"].squeeze(-1)
 
         loss = criterion(predictions, labels)
 
@@ -271,7 +271,7 @@ for epoch in range(EPOCHS):
                 bert_input_ids=input_ids,
                 bert_attention_mask=attention_mask
             )
-            predictions = outputs_dict["outputs"].squeeze(-1)
+            predictions = outputs_dict["logits"].squeeze(-1)
             loss = criterion(predictions, labels)
             val_loss += loss.item()
 

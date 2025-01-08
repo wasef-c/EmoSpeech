@@ -235,10 +235,9 @@ for epoch in range(num_epochs):
         outputs = model(pixel_values=pixel_values,
                         bert_input_ids=input_ids,
                         bert_attention_mask=attention_mask)
-        logits = outputs["logits"]
-
-        # Combined (focal) loss
-        loss = focal_loss(logits, labels)
+        logits = outputs["logits"]  # logits will now be a single continuous value per sample
+        loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
+            
 
         optimizer.zero_grad()
         loss.backward()
@@ -267,13 +266,15 @@ for epoch in range(num_epochs):
             outputs = model(pixel_values=pixel_values,
                             bert_input_ids=input_ids,
                             bert_attention_mask=attention_mask)
-            logits = outputs["logits"]
-            loss = focal_loss(logits, labels)
+            logits = outputs["logits"]  # logits will now be a single continuous value per sample
+            loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
             val_loss += loss.item()
 
-            predictions = torch.argmax(logits, dim=-1)
-            all_predictions.extend(predictions.cpu().numpy())
+            # For regression, predictions are the raw continuous values
+            predictions = logits.squeeze().detach().cpu().numpy()
+            all_predictions.extend(predictions)
             all_labels.extend(labels.cpu().numpy())
+
 
     avg_val_loss = val_loss / len(val_loader)
     accuracy = accuracy_score(all_labels, all_predictions)
@@ -322,9 +323,8 @@ with torch.no_grad():
         outputs = model(pixel_values=pixel_values,
                         bert_input_ids=input_ids,
                         bert_attention_mask=attention_mask)
-        logits = outputs["logits"]
-
-        loss = F.cross_entropy(logits, labels)
+        logits = outputs["logits"]  # logits will now be a single continuous value per sample
+        loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
         test_loss += loss.item()
 
         predictions = torch.argmax(logits, dim=-1)
