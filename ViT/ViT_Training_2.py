@@ -258,7 +258,7 @@ for epoch in range(num_epochs):
                         bert_input_ids=input_ids,
                         bert_attention_mask=attention_mask)
         logits = outputs["logits"]  # logits will now be a single continuous value per sample
-        # loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
+        loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
             
 
         optimizer.zero_grad()
@@ -345,7 +345,7 @@ with torch.no_grad():
         outputs = model(pixel_values=pixel_values,
                         bert_input_ids=input_ids,
                         bert_attention_mask=attention_mask)
-        # logits = outputs["logits"]  # logits will now be a single continuous value per sample
+        logits = outputs["logits"]  # logits will now be a single continuous value per sample
         loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
         test_loss += loss.item()
 

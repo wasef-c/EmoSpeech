@@ -31,8 +31,8 @@ logging.getLogger().addHandler(logging.NullHandler())
 # ----------------------------------------------------------------------
 # Configuration and Paths
 # ----------------------------------------------------------------------
-checkpoint_path = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\EmoSpeech\Curriculum\Regression\Valence\20250108_2\best_model.pt"
-base_dir = r"./Curriculum/Regression/Domination"
+checkpoint_path = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\Currciulum_Models\Speaker\20250107_6\best_model.pt"
+base_dir = r"./Curriculum/Regression/Activation"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
@@ -163,27 +163,27 @@ checkpoint = torch.load(checkpoint_path, map_location=device)
 #     print(key)
 
 
-# # Define the keywords to include and exclude
-# include_keyword = "image_model"
-# exclude_keys = {
-#     "image_model.classifier.weight",
-#     "image_model.classifier.bias"
-# }
+# Define the keywords to include and exclude
+include_keyword = "image_model"
+exclude_keys = {
+    "image_model.classifier.weight",
+    "image_model.classifier.bias"
+}
 
-# # Use dictionary comprehension to filter the keys
-# filtered_checkpoint = {
-#     key: value for key, value in checkpoint.items()
-#     if include_keyword in key and key not in exclude_keys
-# }
+# Use dictionary comprehension to filter the keys
+filtered_checkpoint = {
+    key: value for key, value in checkpoint.items()
+    if include_keyword in key and key not in exclude_keys
+}
 
-# # Optional: Verify the filtered keys
-# print("Filtered keys to be loaded:")
-# for key in filtered_checkpoint.keys():
-#     print(f"- {key}")
+# Optional: Verify the filtered keys
+print("Filtered keys to be loaded:")
+for key in filtered_checkpoint.keys():
+    print(f"- {key}")
 
 
 # Load the filtered state dict
-model.load_state_dict(checkpoint, strict=False)
+model.load_state_dict(filtered_checkpoint, strict=False)
 
 
 # ----------------------------------------------------------------------
