@@ -4,6 +4,7 @@ import logging
 import warnings
 import random
 from collections import Counter
+from datasets import Dataset, DatasetDict
 
 # PyTorch
 import torch
@@ -39,26 +40,14 @@ import seaborn as sns
 from tqdm.auto import tqdm
 
 # Custom functions (assume these are defined in `functions_older.py`)
-
-from functions_older import (
-    create_unique_output_dir,
-    CombinedModelsNew,
-    CustomSampler,
-    collate_fn,
-    calculate_class_weights,
-    train_transforms,
-    val_transforms,
-    AdaptiveLearnableFocalLoss,
-    save_training_metadata,
-)
-
+from functions_older import * 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 logging.getLogger().addHandler(logging.NullHandler())
 logging.getLogger("natten.functional").setLevel(logging.ERROR)
 
 # Paths and configuration
-base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\Currciulum_Models/Speaker"
+base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\VIT_BERT\MSP_POD"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
@@ -68,55 +57,78 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 50
 bert_embedding_dim = 768
 combined_dim = 1024
-column = "SpkrID"
-
-# Path to the checkpoint file
-checkpoint_path = r"G:\My Drive\checkpoint\gender_best_model.pt"
 
 # Pre-trained model references (ViT + BERT)
 image_model_name = "google/vit-base-patch16-224"
 bert_model_name = "bert-base-uncased"
 
 # Dataset loading
-dataset_name = 'cairocode/MSPP_Wav2Vec_4'
-dataset = load_dataset(dataset_name)["train"]
+dataset_name = 'cairocode/MSPP_SPLIT2_wav2vec_FINAL'
+dataset = load_dataset(dataset_name)
 
-# Filter out and map label "X" -> remove it
-unique_values = set(dataset[column])
+# # Filter out rows where "EmoClass" == "X"
+# dataset = dataset.filter(lambda example: example["label"] != 0)
+# # Decrement labels by 1 for all entries in the dataset
+# dataset = dataset.map(lambda example: {"label": example["label"] - 1})
 
+# dataset.push_to_hub('cairocode/MSPP_SPLIT2_wav2vec_FINAL')
+train_dataset  = dataset['train']
+val_dataset = dataset['validation']
+test_dataset = dataset['test']
+
+unique_values = set(train_dataset["label"])
 num_labels = len(unique_values)
-label_mapping = {val: i for i, val in enumerate(unique_values)}
+label_mapping = {
+    0: 'C',
+    1: 'N',
+    2: 'H',
+    3: 'S',
+    4: 'U',
+    5: 'F',
+    6: 'A',
+    7: 'D'
+}
 
 
-# Map label strings to integer IDs
-def encode_category(example):
-    example["label"] = label_mapping[example[column]]
-    return example
+# # Map label strings to integer IDs
+# def encode_category(example):
+#     example["label"] = label_mapping[example["EmoClass"]]
+#     return example
 
-dataset = dataset.map(encode_category)
+# dataset = dataset.map(encode_category)
 
 print("Mapping of categories to integers:", label_mapping)
 
 # Split by speaker (speaker-disjoint test set)
-# unique_speakers = list(set(dataset["SpkrID"]))
-# test_speaker_count = int(0.2 * len(unique_speakers))
+unique_speakers = list(set(train_dataset["SpkrID"]))
+test_speaker_count = int(0.2 * len(unique_speakers))
 # random.seed(42)
 # test_speakers = set(random.sample(unique_speakers, test_speaker_count))
 
 # test_dataset = dataset.filter(lambda x: x["SpkrID"] in test_speakers)
 # training_set = dataset.filter(lambda x: x["SpkrID"] not in test_speakers)
-
 # split_dataset = training_set.train_test_split(test_size=0.2, seed=42)
 
+# train_dataset = split_dataset["train"]
+# val_dataset = split_dataset["test"]
 
-split_dataset = dataset.train_test_split(test_size=0.25, seed=42)
-train_dataset = split_dataset["train"]
-val_dataset = split_dataset["test"]
-test_dataset = val_dataset
+# dataset_dict = DatasetDict({
+#     "train": train_dataset,
+#     "test": test_dataset,
+#     "validation": val_dataset,
+# })
+
+# dataset_dict.push_to_hub("MSPP_SPLIT2_wav2vec")
+
+
 # print("Number of unique speakers:", len(unique_speakers))
 # print("Test speaker count:", len(test_speakers))
 # print("Test dataset size:", len(test_dataset))
-print("Train dataset size:", len(train_dataset))
+# print("Train dataset size:", len(train_dataset))
+# # Quick check for row types:
+# for i, row in enumerate(train_dataset):
+#     if not isinstance(row["transcript"], str):
+#         print(f"Row {i} has type {type(row['transcript'])} for 'transcript'")
 
 # Set transforms
 train_dataset.set_transform(train_transforms)
@@ -126,7 +138,7 @@ test_dataset.set_transform(val_transforms)
 # Dataloaders
 train_loader = DataLoader(
     train_dataset,
-    # sampler=CustomSampler(train_dataset),
+    sampler=CustomSampler(train_dataset),
     batch_size=BATCH_SIZE,
     collate_fn=collate_fn,
 )
@@ -142,8 +154,8 @@ test_loader = DataLoader(
 )
 
 # Calculate and apply class weights (example multipliers)
-# class_weights = calculate_class_weights(train_dataset)
-# class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
+class_weights = calculate_class_weights(train_dataset)
+class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 
 # Initialize models
 processor = AutoImageProcessor.from_pretrained(image_model_name)
@@ -158,7 +170,16 @@ tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
 bert_model = BertModel.from_pretrained(bert_model_name).to(device)
 
 # Combined model
-model = CombinedModelsNew(
+# model = CombinedModelsNew(
+#     image_model=image_model,
+#     bert_model=bert_model,
+#     image_feature_dim=768,   # Feature dim of ViT
+#     bert_embedding_dim=768,  # BERT embedding dim
+#     combined_dim=1024,       # Combined dimension
+#     num_labels=num_labels
+# ).to(device)
+
+model = CombinedModelsBi(
     image_model=image_model,
     bert_model=bert_model,
     image_feature_dim=768,   # Feature dim of ViT
@@ -168,29 +189,37 @@ model = CombinedModelsNew(
 ).to(device)
 
 
-checkpoint = torch.load(checkpoint_path, map_location=device)
 
-# Keys to exclude from loading
-excluded_keys = [
-    "image_model.classifier.weight",
-    "image_model.classifier.bias",
-    "fc3.weight",
-    "fc3.bias",
-    "classifier.weight",
-    "classifier.bias",
-]
 
-# Filter out the excluded keys
-filtered_checkpoint = {k: v for k, v in checkpoint.items() if k not in excluded_keys}
+checkpoint_path = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\Curriculum_VIT_Trained\Regression\Domination\20250109_1\best_model.pt"
+checkpoint_path = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\VIT_BERT\MSP_POD\20250110_1\best_model.pt"
+if checkpoint_path != None:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
 
-# Load the filtered state dict
-model.load_state_dict(filtered_checkpoint, strict=False)
+    # # Option 1: Print each key on a separate line
+    # # for key in checkpoint.keys():
+    # #     print(key)
 
-print("Filtered keys excluded from loading:", excluded_keys)
+    # # Define the keywords to include and exclude
+    # include_keyword = "classifier"
+    # exclude_keys = {
+    #     "image_model.classifier.weight",
+    #     "image_model.classifier.bias"
+    # }
 
-# If you saved optimizer state or other variables, you can load them too
-# optimizer.load_state_dict
+    # # Use dictionary comprehension to filter the keys
+    # filtered_checkpoint = {
+    #     key: value for key, value in checkpoint.items()
+    #     if include_keyword in key and key not in exclude_keys
+    # }
 
+    # # Optional: Verify the filtered keys
+    # print("Filtered keys to be loaded:")
+    # for key in filtered_checkpoint.keys():
+    #     print(f"- {key}")
+
+    # Load the filtered state dict
+    model.load_state_dict(checkpoint, strict=False)
 
 
 # Training configuration
@@ -201,8 +230,8 @@ training_args = TrainingArguments(
     learning_rate=1e-5,
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
-    num_train_epochs=20,
-    weight_decay=0.01,
+    num_train_epochs=30,
+    weight_decay=0.001,
     load_best_model_at_end=True
 )
 
@@ -222,11 +251,11 @@ lr_scheduler = get_scheduler(
 )
 
 # Focal loss
-focal_loss = AdaptiveLearnableFocalLoss(class_weights=None)
+focal_loss = AdaptiveLearnableFocalLoss(class_weights=class_weights)
 
 # Early stopping
 num_epochs = training_args.num_train_epochs
-patience = 5
+patience = 8
 patience_counter = 0
 best_val_acc = 0  # We'll track accuracy; adjust if you prefer UAR or F1
 
@@ -310,6 +339,7 @@ for epoch in range(num_epochs):
         best_val_acc = accuracy
         patience_counter = 0
         torch.save(model.state_dict(), best_model_path)
+        torch.save(model.image_model.state_dict(), "fine_tuned_image_model.pth")
         print("Validation accuracy improved. Saving best model and resetting patience counter.")
     else:
         patience_counter += 1
@@ -377,7 +407,7 @@ ordered_labels_str = [inv_label_mapping[i] for i in ordered_labels_numeric]
 cm = confusion_matrix(
     y_true=all_test_labels, 
     y_pred=all_test_predictions, 
-    labels=ordered_labels_numeric
+    # labels=ordered_labels_numeric
 )
 
 # Step 4: Plot the confusion matrix with custom axis labels
@@ -405,11 +435,11 @@ save_training_metadata(
     output_dir=output_dir,
     pathstr=image_model_name,
     dataset_name=dataset_name,
-    model_type="CombinedModel",
+    model_type="CombinedModelBi",
     super_loss_params="N/A",
     speaker_disentanglement=True,
     entropy=False,
-    column=column,
+    column="label",
     metrics=metrics,
     speakers="N/A",
     angry_weight=label_mapping,  # Adjust if you used weighting per class
@@ -426,3 +456,4 @@ with open(metrics_file, "w") as f:
     f.write(metrics + "\n")
 
 print(f"Metrics saved to {metrics_file}")
+

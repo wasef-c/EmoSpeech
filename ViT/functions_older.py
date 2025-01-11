@@ -249,7 +249,6 @@ class CrossAttentionLayer(nn.Module):
 
 
 
-
 class BiCrossAttentionLayer(nn.Module):
     """
     Bidirectional cross-attention:
@@ -258,37 +257,21 @@ class BiCrossAttentionLayer(nn.Module):
 
     Returns updated x1 and x2.
     """
-    def __init__(self, 
-                 dim1,       # input dim of x1
-                 dim2,       # input dim of x2
-                 embed_dim,  # internal (common) dim for attention
-                 num_heads,
-                 dropout_prob=0.1):
+    def __init__(self, dim1, dim2, embed_dim, num_heads, dropout_prob=0.1):
         super(BiCrossAttentionLayer, self).__init__()
-
-        # 1->2 cross attention (x1 attends to x2)
+        # 1->2 cross attention (unchanged)
         self.query_proj_12 = nn.Linear(dim1, embed_dim)
         self.key_proj_12   = nn.Linear(dim2, embed_dim)
         self.value_proj_12 = nn.Linear(dim2, embed_dim)
-        self.attn_12 = nn.MultiheadAttention(
-            embed_dim=embed_dim, 
-            num_heads=num_heads, 
-            dropout=dropout_prob, 
-            batch_first=True
-        )
+        self.attn_12 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout_prob, batch_first=True)
         self.layer_norm_12 = nn.LayerNorm(embed_dim)
         self.dropout_12 = nn.Dropout(dropout_prob)
 
-        # 2->1 cross attention (x2 attends to x1)
-        self.query_proj_21 = nn.Linear(dim2, embed_dim)
-        self.key_proj_21   = nn.Linear(dim1, embed_dim)
-        self.value_proj_21 = nn.Linear(dim1, embed_dim)
-        self.attn_21 = nn.MultiheadAttention(
-            embed_dim=embed_dim, 
-            num_heads=num_heads, 
-            dropout=dropout_prob, 
-            batch_first=True
-        )
+        # 2->1 cross attention
+        self.query_proj_21 = nn.Linear(dim2, embed_dim)  # x2 (dim2 -> embed_dim)
+        self.key_proj_21   = nn.Linear(embed_dim, embed_dim)  # Updated x1 (embed_dim -> embed_dim)
+        self.value_proj_21 = nn.Linear(embed_dim, embed_dim)  # Updated x1 (embed_dim -> embed_dim)
+        self.attn_21 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout_prob, batch_first=True)
         self.layer_norm_21 = nn.LayerNorm(embed_dim)
         self.dropout_21 = nn.Dropout(dropout_prob)
 
@@ -311,6 +294,7 @@ class BiCrossAttentionLayer(nn.Module):
         attn_out_12, _ = self.attn_12(q_12, k_12, v_12, attn_mask=mask1)
         # Residual + LayerNorm
         updated_x1 = self.layer_norm_12(q_12 + self.dropout_12(attn_out_12))
+        # print("q_12 in_features:", x1.shape[-1], "vs. query_proj_12 weight shape:", self.query_proj_12.weight.shape)
 
         # --------------------------------------------------
         # 2) x2 -> x1 cross-attention
@@ -340,7 +324,7 @@ class CombinedModelsBi(nn.Module):
         num_labels,
         dropout_prob=0.1
     ):
-        super(CombinedModelsNew, self).__init__()
+        super(CombinedModelsBi, self).__init__()
         self.image_model = image_model
         self.bert_model = bert_model
         self.gem_pooling = GeMPooling()
@@ -414,6 +398,7 @@ class CombinedModelsBi(nn.Module):
         #    updated_image: (B, 1, embed_dim)
         #    updated_text:  (B, seq_len, embed_dim)
         # --------------------------------------------
+       
         updated_image, updated_text = self.bi_cross_attn(
             x1=image_features,      # shape (B, 1, image_feature_dim)
             x2=bert_embeddings      # shape (B, seq_len, bert_embedding_dim)
@@ -447,7 +432,6 @@ class CombinedModelsBi(nn.Module):
 
         # Return the logits (and optionally loss if needed)
         return {"logits": logits}
-
 
 
 class GeMPooling(nn.Module):
@@ -858,7 +842,7 @@ def concordance_correlation_coefficient(x, y):
 
     return numerator / denominator if denominator != 0 else 0.0
 
-def compute_regression_metrics(eval_pred):
+def compute_regression_metrics(predictions, labels):
     """
     For regression: compute CCC and R^2.
 
@@ -866,7 +850,7 @@ def compute_regression_metrics(eval_pred):
        predictions: np.array of shape (N,) or (N,1)
        labels:      np.array of shape (N,) or (N,1)
     """
-    predictions, labels = eval_pred
+    # predictions, labels = eval_pred
 
     # Make sure arrays are 1D if your model outputs (N,1)
     predictions = np.squeeze(predictions)

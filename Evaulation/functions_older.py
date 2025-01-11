@@ -42,6 +42,47 @@ def filter_m_examples(example):
 # Data Transformations
 # Data Transformations
 
+def test_collate_fn(examples):
+    """
+    Custom collate function to handle batching of image data and BERT inputs.
+    """
+    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(device)
+    input_ids = torch.stack([example["input_ids"] for example in examples]).to(device)
+    attention_mask = torch.stack([example["attention_mask"] for example in examples]).to(device)
+    file_name = [example["file"] for example in examples]
+    bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
+    
+
+
+    return {
+        "pixel_values": pixel_values,
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "file": file_name,
+        "bert_embeddings":bert_embeddings
+    }
+
+
+def training_collate(examples):
+    """
+    Custom collate function to handle batching of image data and BERT inputs.
+    """
+    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(device)
+    input_ids = torch.stack([example["input_ids"] for example in examples]).to(device)
+    attention_mask = torch.stack([example["attention_mask"] for example in examples]).to(device)
+    file_name = [example["files"] for example in examples]
+    bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
+    labels = [example["label"] for example in examples]
+
+
+    return {
+        "pixel_values": pixel_values,
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "file": file_name,
+        "bert_embeddings":bert_embeddings, 
+        "labels": labels
+    }
 
 def compute_bert_embeddings(transcripts):
     # Tokenize the transcripts and generate input_ids and attention_mask
@@ -850,7 +891,7 @@ def compute_regression_metrics(predictions, labels):
        predictions: np.array of shape (N,) or (N,1)
        labels:      np.array of shape (N,) or (N,1)
     """
-   # predictions, labels = eval_pred
+    # predictions, labels = eval_pred
 
     # Make sure arrays are 1D if your model outputs (N,1)
     predictions = np.squeeze(predictions)

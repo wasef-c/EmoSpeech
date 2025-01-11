@@ -39,17 +39,7 @@ import seaborn as sns
 from tqdm.auto import tqdm
 
 # Custom functions (assume these are defined in `functions_older.py`)
-from functions_older import (
-    create_unique_output_dir,
-    CombinedModelsNew,
-    CustomSampler,
-    collate_fn,
-    calculate_class_weights,
-    train_transforms,
-    val_transforms,
-    AdaptiveLearnableFocalLoss,
-    save_training_metadata,
-)
+from functions_older import *
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -57,7 +47,7 @@ logging.getLogger().addHandler(logging.NullHandler())
 logging.getLogger("natten.functional").setLevel(logging.ERROR)
 
 # Paths and configuration
-base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\VIT_BERT\MSP_POD"
+base_dir = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\VIT_BERT\MSP_POD_CURR"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
@@ -102,6 +92,7 @@ test_speakers = set(random.sample(unique_speakers, test_speaker_count))
 test_dataset = dataset.filter(lambda x: x["SpkrID"] in test_speakers)
 training_set = dataset.filter(lambda x: x["SpkrID"] not in test_speakers)
 split_dataset = training_set.train_test_split(test_size=0.2, seed=42)
+split_dataset.push_to_hub("MSPP_SPLIT_Wav2vec")
 
 train_dataset = split_dataset["train"]
 val_dataset = split_dataset["test"]
@@ -174,6 +165,37 @@ model = CombinedModelsBi(
 ).to(device)
 
 
+checkpoint_path = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\Curriculum_VIT_Trained\Regression\Domination\20250109_1\best_model.pt"
+if checkpoint_path != None:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    # Option 1: Print each key on a separate line
+    # for key in checkpoint.keys():
+    #     print(key)
+
+    # Define the keywords to include and exclude
+    include_keyword = "classifier"
+    exclude_keys = {
+        "image_model.classifier.weight",
+        "image_model.classifier.bias"
+    }
+
+    # Use dictionary comprehension to filter the keys
+    filtered_checkpoint = {
+        key: value for key, value in checkpoint.items()
+        if include_keyword in key and key not in exclude_keys
+    }
+
+    # Optional: Verify the filtered keys
+    print("Filtered keys to be loaded:")
+    for key in filtered_checkpoint.keys():
+        print(f"- {key}")
+
+    # Load the filtered state dict
+    model.load_state_dict(filtered_checkpoint, strict=False)
+
+
+
 # Training configuration
 training_args = TrainingArguments(
     output_dir="./logs",
@@ -235,10 +257,9 @@ for epoch in range(num_epochs):
         outputs = model(pixel_values=pixel_values,
                         bert_input_ids=input_ids,
                         bert_attention_mask=attention_mask)
-        logits = outputs["logits"]
-
-        # Combined (focal) loss
-        loss = focal_loss(logits, labels)
+        logits = outputs["logits"]  # logits will now be a single continuous value per sample
+        # loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
+            
 
         optimizer.zero_grad()
         loss.backward()
@@ -267,13 +288,15 @@ for epoch in range(num_epochs):
             outputs = model(pixel_values=pixel_values,
                             bert_input_ids=input_ids,
                             bert_attention_mask=attention_mask)
-            logits = outputs["logits"]
-            loss = focal_loss(logits, labels)
+            logits = outputs["logits"]  # logits will now be a single continuous value per sample
+            loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
             val_loss += loss.item()
 
-            predictions = torch.argmax(logits, dim=-1)
-            all_predictions.extend(predictions.cpu().numpy())
+            # For regression, predictions are the raw continuous values
+            predictions = logits.squeeze().detach().cpu().numpy()
+            all_predictions.extend(predictions)
             all_labels.extend(labels.cpu().numpy())
+
 
     avg_val_loss = val_loss / len(val_loader)
     accuracy = accuracy_score(all_labels, all_predictions)
@@ -322,9 +345,8 @@ with torch.no_grad():
         outputs = model(pixel_values=pixel_values,
                         bert_input_ids=input_ids,
                         bert_attention_mask=attention_mask)
-        logits = outputs["logits"]
-
-        loss = F.cross_entropy(logits, labels)
+        # logits = outputs["logits"]  # logits will now be a single continuous value per sample
+        loss = nn.MSELoss()(logits.squeeze(), labels)  # Use a regression-appropriate loss, e.g., MSELoss
         test_loss += loss.item()
 
         predictions = torch.argmax(logits, dim=-1)
@@ -394,7 +416,7 @@ save_training_metadata(
     metrics=metrics,
     speakers="N/A",
     angry_weight=label_mapping,  # Adjust if you used weighting per class
-    happy_weight=None,  
+    happy_weight=checkpoint,  
     neutral_weight=None,
     sad_weight=None,
     weight_decay=training_args.weight_decay,
@@ -407,4 +429,4 @@ with open(metrics_file, "w") as f:
     f.write(metrics + "\n")
 
 print(f"Metrics saved to {metrics_file}")
-
+p

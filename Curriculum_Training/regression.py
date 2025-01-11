@@ -1,6 +1,3 @@
-# !git clone https://github.com/wasef-c/EmoSpeech.git
-# !pip install transformers[torch] torch datasets seaborn matplotlib scikit-learn
-# !pip install --upgrade Pillow
 
 import os
 import logging
@@ -34,21 +31,21 @@ logging.getLogger().addHandler(logging.NullHandler())
 # ----------------------------------------------------------------------
 # Configuration and Paths
 # ----------------------------------------------------------------------
-checkpoint_path = "./Curriculum/Speaker/20250106_10/best_model.pt"
-base_dir = r"./Curriculum/Regression/Activation"
+checkpoint_path = r"C:\Users\Paolo\Documents\carol_emo_rec\MLLM\EmoSpeech\Curriculum\Regression\Valence\20250108_2\best_model.pt"
+base_dir = r"./Curriculum/Regression/Domination"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
 
-column = "EmoAct"  # or "arousal", "score", etc.
+column =  "EmoDom" # "EmoVal" #"EmoAct"  # or "arousal", "score", etc.
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-BATCH_SIZE = 50
+BATCH_SIZE = 52
 LEARNING_RATE = 1e-5
-EPOCHS = 20
+EPOCHS = 52
 WEIGHT_DECAY = 0.01
-PATIENCE = 5
+PATIENCE = 10
 
 # Pre-trained model names (ViT + BERT)
 image_model_name = "google/vit-base-patch16-224"
@@ -135,7 +132,7 @@ test_loader = DataLoader(
 # Initialize Image + Text Models
 # ----------------------------------------------------------------------
 image_processor = AutoImageProcessor.from_pretrained(image_model_name)
-base_image_model = ViTForImageClassification.from_pretrained(
+image_model = ViTForImageClassification.from_pretrained(
     image_model_name,
     ignore_mismatched_sizes=True,
     num_labels=1,
@@ -148,36 +145,45 @@ base_bert_model = BertModel.from_pretrained(bert_model_name).to(device)
 # ----------------------------------------------------------------------
 # Initialize the Combined Regression Model
 # ----------------------------------------------------------------------
-model = CombinedModelsNewRegression(
-    image_model=base_image_model,
-    bert_model=base_bert_model,
-    image_feature_dim=768,   # Feature dimension from ViT
-    bert_embedding_dim=768,  # BERT embedding dimension
+model = CombinedModelsBi(
+    image_model=image_model,
+    bert_model=bert_model,
+    image_feature_dim=768,   # Feature dim of ViT
+    bert_embedding_dim=768,  # BERT embedding dim
     combined_dim=1024,       # Combined dimension
-    output_dim=1            # Single-value regression output
+    num_labels=1
 ).to(device)
+
 
 
 checkpoint = torch.load(checkpoint_path, map_location=device)
 
-# Keys to exclude from loading
-excluded_keys = [
-    "image_model.classifier.weight",
-    "image_model.classifier.bias",
-    "fc3.weight",
-    "fc3.bias",
-    "classifier.weight",
-    "classifier.bias",
-]
+# Option 1: Print each key on a separate line
+# for key in checkpoint.keys():
+#     print(key)
 
-# Filter out the excluded keys
-filtered_checkpoint = {k: v for k,
-                       v in checkpoint.items() if k not in excluded_keys}
+
+# # Define the keywords to include and exclude
+# include_keyword = "image_model"
+# exclude_keys = {
+#     "image_model.classifier.weight",
+#     "image_model.classifier.bias"
+# }
+
+# # Use dictionary comprehension to filter the keys
+# filtered_checkpoint = {
+#     key: value for key, value in checkpoint.items()
+#     if include_keyword in key and key not in exclude_keys
+# }
+
+# # Optional: Verify the filtered keys
+# print("Filtered keys to be loaded:")
+# for key in filtered_checkpoint.keys():
+#     print(f"- {key}")
+
 
 # Load the filtered state dict
-model.load_state_dict(filtered_checkpoint, strict=False)
-
-print("Filtered keys excluded from loading:", excluded_keys)
+model.load_state_dict(checkpoint, strict=False)
 
 
 # ----------------------------------------------------------------------
@@ -193,10 +199,34 @@ lr_scheduler = get_scheduler(
     num_training_steps=num_training_steps,
 )
 
-criterion = nn.MSELoss()
+# import torch
+# import torch.nn as nn
+
+class CCCLoss(nn.Module):
+    def __init__(self):
+        super(CCCLoss, self).__init__()
+
+    def forward(self, y_pred, y_true):
+        y_true_mean = torch.mean(y_true)
+        y_pred_mean = torch.mean(y_pred)
+        
+        y_true_var = torch.var(y_true, unbiased=False)
+        y_pred_var = torch.var(y_pred, unbiased=False)
+        
+        covariance = torch.mean((y_true - y_true_mean) * (y_pred - y_pred_mean))
+        
+        ccc = (2 * covariance) / (
+            y_true_var + y_pred_var + (y_true_mean - y_pred_mean) ** 2 + 1e-8
+        )  # Adding epsilon to avoid division by zero
+        
+        loss = 1 - ccc
+        return loss
+
+
+criterion = CCCLoss()
 
 patience_counter = 0
-best_val_loss = float("inf")
+best_val_loss = 0 # float("inf")
 
 train_losses = []
 val_losses = []
@@ -227,7 +257,7 @@ for epoch in range(EPOCHS):
         )
         # Your model returns {"outputs": <tensor>}
         # shape: [batch_size, 1]
-        predictions = outputs_dict["outputs"].squeeze(-1)
+        predictions = outputs_dict["logits"].squeeze(-1)
 
         loss = criterion(predictions, labels)
 
@@ -262,7 +292,7 @@ for epoch in range(EPOCHS):
                 bert_input_ids=input_ids,
                 bert_attention_mask=attention_mask
             )
-            predictions = outputs_dict["outputs"].squeeze(-1)
+            predictions = outputs_dict["logits"].squeeze(-1)
             loss = criterion(predictions, labels)
             val_loss += loss.item()
 
@@ -273,16 +303,27 @@ for epoch in range(EPOCHS):
     train_losses.append(avg_train_loss)
     val_losses.append(avg_val_loss)
     epochs_list.append(epoch + 1)
+    metrics = compute_regression_metrics(all_predictions, all_labels)
 
-    print(f"Validation Loss: {avg_val_loss:.4f}")
+    print(f"Validation Loss: {avg_val_loss:.4f} Metrics: {metrics}")
 
     # Optional: compute regression metrics if you have them
     # metrics_dict = compute_regression_metrics(all_predictions, all_labels)
     # print(metrics_dict)
 
     # Early stopping based on validation loss
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
+    # if avg_val_loss < best_val_loss:
+    #     best_val_loss = avg_val_loss
+    #     patience_counter = 0
+    #     torch.save(model.state_dict(), best_model_path)
+    #     print("Validation loss improved. Saving best model and resetting patience counter.")
+    # else:
+    #     patience_counter += 1
+    #     if patience_counter >= PATIENCE:
+    #         print("Early stopping triggered. Stopping training.")
+    #         break
+    if metrics['CCC'] > best_val_loss:
+        best_val_loss = metrics['CCC']
         patience_counter = 0
         torch.save(model.state_dict(), best_model_path)
         print("Validation loss improved. Saving best model and resetting patience counter.")
@@ -321,7 +362,7 @@ with torch.no_grad():
             bert_input_ids=input_ids,
             bert_attention_mask=attention_mask
         )
-        predictions = outputs_dict["outputs"].squeeze(-1)
+        predictions = outputs_dict["logits"].squeeze(-1)
 
         loss = criterion(predictions, labels)
         test_loss += loss.item()
@@ -330,7 +371,9 @@ with torch.no_grad():
         all_test_labels.extend(labels.cpu().numpy())
 
 avg_test_loss = test_loss / len(test_loader)
-print(f"Test Loss: {avg_test_loss:.4f}")
+metrics = compute_regression_metrics(all_test_predictions, all_test_labels)
+
+print(f"Test Loss: {avg_test_loss:.4f} Metrics: {metrics}")
 
 # If you have your own regression metrics function:
 # test_metrics = compute_regression_metrics(all_test_predictions, all_test_labels)
@@ -339,7 +382,7 @@ print(f"Test Loss: {avg_test_loss:.4f}")
 # ----------------------------------------------------------------------
 # Save Final Results & Metadata
 # ----------------------------------------------------------------------
-final_metrics_str = f"Test Loss: {avg_test_loss:.4f}"
+final_metrics_str = f"Test Loss: {avg_test_loss:.4f} Metrics: {metrics}"
 save_training_metadata(
     output_dir=output_dir,
     pathstr=image_model_name,
@@ -351,7 +394,7 @@ save_training_metadata(
     column="label",
     metrics=final_metrics_str,
     speakers="N/A",
-    angry_weight=None,
+    angry_weight="CCC loss fn",
     happy_weight=None,
     neutral_weight=None,
     sad_weight=None,
