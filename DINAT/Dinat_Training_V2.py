@@ -40,6 +40,16 @@ from functions_old import *
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
+label_mapping = {
+    0: 'C',
+    1: 'N',
+    2: 'H',
+    3: 'S',
+    4: 'U',
+    5: 'F',
+    6: 'A',
+    7: 'D'
+}
 
 # Directories and Model Config
 base_dir = r"/media/carol/Data/Documents/Emo_rec/Notebooks/DINAT_BERT/MSPP_COMP/wav2vec"
@@ -57,50 +67,13 @@ bert_model_name = "bert-base-uncased"
 BATCH_SIZE = 20
 
 # Load Dataset
-dataset_name = "cairocode/MSPP_POD_wav2vec3"
+dataset_name = "cairocode/MSPP_W2Split_Balanced"
 dataset = load_dataset(dataset_name)
-dataset = dataset['train']
+train_dataset  = dataset['train']
+val_dataset = dataset['validation']
+test_dataset = dataset['test']
 
-# Filter and Map Labels
-unique_values = set(dataset["EmoClass"])
-unique_values = [val for val in unique_values if val != "X"]
-num_labels = len(unique_values)
-label_mapping = {val: i for i, val in enumerate(unique_values)}
-label_mapping = {'D': 0, 'H': 1, 'A': 2, 'O': 3, 'N': 4, 'C': 5, 'F': 6, 'S': 7} #COMMENT OUT?
-
-dataset = dataset.filter(lambda example: example["EmoClass"] != "X")
-
-# Map label strings to integer IDs
-def encode_category(example):
-    example["label"] = label_mapping[example["EmoClass"]]
-    return example
-
-dataset = dataset.map(encode_category)
-def has_valid_transcript(example):
-    return example["transcript"] is not None
-
-dataset = dataset.filter(has_valid_transcript)
-
-print("Mapping of categories to integers:", label_mapping)
-
-# Split by speaker (speaker-disjoint test set)
-unique_speakers = list(set(dataset["SpkrID"]))
-test_speaker_count = int(0.2 * len(unique_speakers))
-random.seed(42)
-test_speakers = set(random.sample(unique_speakers, test_speaker_count))
-
-test_dataset = dataset.filter(lambda x: x["SpkrID"] in test_speakers)
-training_set = dataset.filter(lambda x: x["SpkrID"] not in test_speakers)
-
-# training_set = mapped_dataset.filter(lambda example: example["SpkrID"] not in test_speakers)
-
-# 3. Further split the training set into train/validation
-split_dataset = training_set.train_test_split(test_size=0.2, seed=42)
-train_dataset = split_dataset["train"]
-val_dataset = split_dataset["test"]
-
-print("Number of unique speakers:", len(unique_speakers))
-print("Test speaker count:", len(test_speakers))
+num_labels = 8
 print("Test dataset size:", len(test_dataset))
 print("Train dataset size:", len(train_dataset))
 
@@ -352,11 +325,21 @@ ordered_labels_str = [inv_label_mapping[i] for i in ordered_labels_numeric]
 # all_test_labels = [...]
 # all_test_predictions = [...]
 
+inv_label_mapping = {v: k for k, v in label_mapping.items()}
+
+# Step 2: Specify an order for the numeric labels
+ordered_labels_numeric = [0, 1, 2, 3, 4, 5, 6, 7]
+ordered_labels_str = [label_mapping[i] for i in ordered_labels_numeric]
+
+# Suppose these are your test labels and predictions (as numeric):
+# all_test_labels = [...]
+# all_test_predictions = [...]
+
 # Step 3: Generate the confusion matrix
 cm = confusion_matrix(
     y_true=all_test_labels, 
     y_pred=all_test_predictions, 
-    labels=ordered_labels_numeric
+    # labels=ordered_labels_numeric
 )
 
 # Step 4: Plot the confusion matrix with custom axis labels
@@ -384,7 +367,7 @@ save_training_metadata(
     output_dir=output_dir,
     pathstr=pretrain_model,
     dataset_name=dataset_name,
-    model_type="CombinedModel",
+    model_type="CombinedModelsDDCA",
     super_loss_params="N/A",
     speaker_disentanglement=True,
     entropy=False,
