@@ -30,29 +30,29 @@ Datasets = '/media/carol/Data/DATASETS/Emotion Datasets'
 
 def clean_audio(path):
     y, sr = librosa.load(path)
-    S_full, phase = librosa.magphase(librosa.stft(y))
-    idx = slice(*librosa.time_to_frames([2, 6], sr=sr))
-    width = int((S_full.shape[-1] - 1)/2)-1
-    S_filter = librosa.decompose.nn_filter(S_full,
-                                           aggregate=np.median,
-                                           metric='cosine',
-                                           width=width)
-    S_filter = np.minimum(S_full, S_filter)
-    margin_i, margin_v = 2, 10
-    power = 2
+    # S_full, phase = librosa.magphase(librosa.stft(y))
+    # idx = slice(*librosa.time_to_frames([2, 6], sr=sr))
+    # width = int((S_full.shape[-1] - 1)/2)-1
+    # S_filter = librosa.decompose.nn_filter(S_full,
+    #                                        aggregate=np.median,
+    #                                        metric='cosine',
+    #                                        width=width)
+    # S_filter = np.minimum(S_full, S_filter)
+    # margin_i, margin_v = 2, 10
+    # power = 2
 
-    mask_i = librosa.util.softmask(S_filter,
-                                   margin_i * (S_full - S_filter),
-                                   power=power)
+    # mask_i = librosa.util.softmask(S_filter,
+    #                                margin_i * (S_full - S_filter),
+    #                                power=power)
 
-    mask_v = librosa.util.softmask(S_full - S_filter,
-                                   margin_v * S_filter,
-                                   power=power)
+    # mask_v = librosa.util.softmask(S_full - S_filter,
+    #                                margin_v * S_filter,
+    #                                power=power)
 
-    S_foreground = mask_v * S_full
+    # S_foreground = mask_v * S_full
 
-    sound = librosa.istft(S_foreground * phase)
-    # sound = y
+    # sound = librosa.istft(S_foreground * phase)
+    sound = y
     # # # sf.write(os.path.join(new_dir,new_name), librosa.istft(S_foreground * phase), sr)
     return sound, sr
 
@@ -455,8 +455,8 @@ elif dataset_choice == 11:
     file_path = r'D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test\metadata.csv'
     df = pd.read_csv(file_path)
 
-    image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\test_old_set'
+    image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\noise_analysis\noisy'
     os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\test_old_set'
+    csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\noise_analysis'
     os.makedirs(csv_dir, exist_ok=True)
     process_files(df, image_dir, csv_dir, 0)
