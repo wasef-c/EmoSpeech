@@ -139,10 +139,17 @@ if test == True:
             all_test_files.extend(file_name)
 
             # After testing loop completes, create a pandas DataFrame
+    # Map all_test_predictions to letters using label_mapping
+    mapped_predictions = [label_mapping[pred] for pred in all_test_predictions]
+
+    # Create the DataFrame with mapped predictions
     df = pd.DataFrame({
         "FileName": all_test_files,
-        "EmoClass": all_test_predictions
+        "EmoClass": mapped_predictions
     })
+
+    print(df)
+
     # Finally, write DataFrame to CSV
     df.to_csv(os.path.join(save_dir, "test_predictions.csv"), index=False)
 
@@ -200,6 +207,8 @@ if test == False:
     df.to_csv(os.path.join(save_dir, "training_test_predictions.csv"), index=False)
     print("Predictions saved to predictions.csv")
 
+    from sklearn.metrics import accuracy_score, recall_score, f1_score
+
     # Calculate Accuracy
     accuracy = accuracy_score(all_test_labels, all_test_predictions)
     print(f"Accuracy: {accuracy * 100:.2f}%")
@@ -208,13 +217,22 @@ if test == False:
     uar = recall_score(all_test_labels, all_test_predictions, average='macro')
     print(f"UAR: {uar * 100:.2f}%")
 
+    # Calculate F1 Macro
+    f1_macro = f1_score(all_test_labels, all_test_predictions, average='macro')
+    print(f"F1 Macro: {f1_macro * 100:.2f}%")
+
+    # Calculate F1 Micro
+    f1_micro = f1_score(all_test_labels, all_test_predictions, average='micro')
+    print(f"F1 Micro: {f1_micro * 100:.2f}%")
+
+
 
     
     inv_label_mapping = {v: k for k, v in label_mapping.items()}
 
     # Step 2: Specify an order for the numeric labels
     ordered_labels_numeric = [0, 1, 2, 3, 4, 5, 6, 7]
-    ordered_labels_str = [inv_label_mapping[i] for i in ordered_labels_numeric]
+    ordered_labels_str = [label_mapping[i] for i in ordered_labels_numeric]
 
     # Step 3: Generate the confusion matrix
     cm = confusion_matrix(
@@ -238,7 +256,7 @@ if test == False:
     plt.title("Confusion Matrix")
 
     # Save and close
-    save_path = os.path.join(output_dir, "confusion_matrix.png")
+    save_path = os.path.join(save_dir, "confusion_matrix.png")
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
     print(f"Confusion matrix saved to: {save_path}")

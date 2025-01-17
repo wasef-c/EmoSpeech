@@ -618,6 +618,78 @@ class AdaptiveLearnableFocalLoss(nn.Module):
         return combined_loss.mean()
 
 
+
+class AdaptiveLearnableFocalLoss2(nn.Module):
+    def __init__(
+        self, 
+        alpha_init=1.0, 
+        gamma_init=2.0, 
+        label_smoothing=0.0, 
+        learnable=True
+    ):
+        super(AdaptiveLearnableFocalLoss2, self).__init__()
+        
+        self.label_smoothing = label_smoothing
+
+        if learnable:
+            # Use raw parameters and transform them in forward() to keep them in valid ranges
+
+            # We want alpha > 0, so we param through a softplus
+            # log(exp(x) - 1) is an inverse of softplus for a positive initial guess
+            if alpha_init > 0:
+                self.alpha_raw = nn.Parameter(
+                    torch.log(torch.exp(torch.tensor([alpha_init], dtype=torch.float32)) - 1)
+                )
+            else:
+                # If alpha_init <= 0 for some reason, just start near 0
+                self.alpha_raw = nn.Parameter(torch.tensor(0.0))
+            
+            # Same logic for gamma > 0
+            if gamma_init > 0:
+                self.gamma_raw = nn.Parameter(
+                    torch.log(torch.exp(torch.tensor([gamma_init], dtype=torch.float32)) - 1)
+                )
+            else:
+                self.gamma_raw = nn.Parameter(torch.tensor(0.0))
+
+            # Adaptive factor in [0, 1] using sigmoid
+            self.adaptive_factor_raw = nn.Parameter(torch.zeros(1))
+
+        else:
+            # Non-learnable parameters
+            self.register_buffer("alpha_raw", torch.tensor([alpha_init], dtype=torch.float32))
+            self.register_buffer("gamma_raw", torch.tensor([gamma_init], dtype=torch.float32))
+            self.register_buffer("adaptive_factor_raw", torch.tensor(0.0))
+
+    def forward(self, logits, targets):
+        # Map raw parameters to valid ranges
+        alpha = F.softplus(self.alpha_raw)        # ensures alpha > 0
+        gamma = F.softplus(self.gamma_raw)        # ensures gamma > 0
+        adaptive_factor = torch.sigmoid(self.adaptive_factor_raw)  # in [0,1]
+        
+        # ---- Cross-Entropy Loss with label smoothing ----
+        ce_loss = F.cross_entropy(
+            logits, 
+            targets, 
+            reduction='none', 
+            label_smoothing=self.label_smoothing
+        )
+
+        # ---- Compute probability of the true class (pt = e^{-CE}) ----
+        pt = torch.exp(-ce_loss)
+        
+        # ---- Focal term: (1 - pt)^gamma ----
+        focal_term = (1 - pt) ** gamma
+
+        # ---- Focal loss = alpha * focal_term * CE ----
+        focal_loss = alpha * focal_term * ce_loss
+
+        # ---- Combine the two losses using adaptive factor ----
+        combined_loss = adaptive_factor * focal_loss + (1 - adaptive_factor) * ce_loss
+
+        return combined_loss.mean()
+
+
 # Metric Calculation
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
