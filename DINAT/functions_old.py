@@ -18,6 +18,11 @@ from sklearn.cross_decomposition import CCA
 from typing import Dict  # Add this import
 from transformers import AutoImageProcessor, DinatForImageClassification, TrainingArguments, Trainer, AutoTokenizer, AutoModel
 from sklearn.utils.class_weight import compute_class_weight
+from collections import OrderedDict
+import random
+import numpy as np
+from datasets import concatenate_datasets
+
 
 '''
 (C)	Mohammad Haghighat, University of Miami
@@ -952,7 +957,26 @@ class GeMPooling(nn.Module):
             self.p), dim=(2, 3)).pow(1.0 / self.p)
         return pooled
 
+def collate_fn_reg(examples, column):
+    """
+    Custom collate function to handle batching of image data and BERT inputs.
+    """
+    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(device)
+    input_ids = torch.stack([example["input_ids"] for example in examples]).to(device)
+    attention_mask = torch.stack([example["attention_mask"] for example in examples]).to(device)
+    labels = torch.tensor([example[column] for example in examples]).to(device)
+    bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
 
+
+
+    return {
+        "pixel_values": pixel_values,
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "labels": labels,
+        "bert_embeddings":bert_embeddings
+    }
+    
 
 class AdaptiveLearnableFocalLoss(nn.Module):
     def __init__(self, alpha_init=1.0, gamma_init=2.0, learnable=True, class_weights=None):
@@ -992,4 +1016,81 @@ class AdaptiveLearnableFocalLoss(nn.Module):
             focal_loss + (1 - self.adaptive_factor) * ce_loss
 
         return combined_loss.mean()
+
+
+
+
+def get_label_boundaries(dataset, label_column="label"):
+    """
+    Given a sorted dataset, identify the start (inclusive)
+    and end (exclusive) indices for each label.
+    """
+    boundaries = OrderedDict()
+    current_label = None
+    start_idx = 0
+    
+    # Because the dataset is sorted, we only record changes in label
+    for idx, example in enumerate(dataset):
+        label = example[label_column]
+        if current_label is None:
+            current_label = label
+            start_idx = idx
+        elif label != current_label:
+            # record the boundary for the old label
+            boundaries[current_label] = (start_idx, idx)
+            # update current label
+            current_label = label
+            start_idx = idx
+    
+    # The last label boundary
+    if current_label is not None:
+        boundaries[current_label] = (start_idx, len(dataset))
+    
+    return boundaries
+
+def balance_dataset_by_sort(
+    sorted_dataset,
+    label_boundaries,
+    target_size,
+    label_column="label",
+    seed=42
+):
+    random.seed(seed)
+    np.random.seed(seed)
+    
+    balanced_splits = []
+    
+    for lbl, (start_idx, end_idx) in label_boundaries.items():
+        subset_size = end_idx - start_idx
+        subset = sorted_dataset.select(range(start_idx, end_idx))
+        
+        if subset_size < target_size:
+            # Oversample
+            times_full = target_size // subset_size
+            remainder = target_size % subset_size
+            
+            oversampled_full = concatenate_datasets([subset] * times_full)
+            
+            if remainder > 0:
+                subset_shuffled = subset.shuffle(seed=seed)
+                oversampled_remainder = subset_shuffled.select(range(remainder))
+                oversampled_full = concatenate_datasets([oversampled_full, oversampled_remainder])
+            
+            balanced_splits.append(oversampled_full)
+        
+        elif subset_size > target_size:
+            # Undersample
+            subset_shuffled = subset.shuffle(seed=seed)
+            undersampled = subset_shuffled.select(range(target_size))
+            balanced_splits.append(undersampled)
+        
+        else:
+            # Exactly target_size
+            balanced_splits.append(subset)
+    
+    # Concatenate everything
+    balanced_dataset = concatenate_datasets(balanced_splits)
+    return balanced_dataset
+
+
 

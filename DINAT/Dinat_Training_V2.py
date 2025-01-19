@@ -61,7 +61,7 @@ CHECKPOINT_PATH = "./NLPIMG_Model_001"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model_path = "shi-labs/dinat-mini-in1k-224"  # For processor loading if needed
-checkpoint_path = "./DinatCurriculum/Regression/Activation/EmoDom/20250117_1/best_model.pt"
+checkpoint_path = None #"./DinatCurriculum/Regression/Activation/EmoDom/20250117_1/best_model.pt"
 pretrain_model = model_path
 bert_model_name = "bert-base-uncased"
 BATCH_SIZE = 20

@@ -197,11 +197,20 @@ def process_files(df, image_dir, csv_dir, ds=0):
             writer.writeheader()
 
         for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing audio files"):
+            # print(row['file_name'])
+            wav_name = os.path.splitext(row['file_name'])[0] + ".wav"
+
+            # print(wav_name)
             file_path = os.path.join(
-                r"D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test", row['file_name'])
+                r"/media/carol/Data/DATASETS/MSP_POD_2/Audios", wav_name)
+            
+            if os.path.exists(file_path) == False:
+                print(f"File does not exist: {file_path}")
+                continue
+            
             file_name = row['file_name']
-            label_val = row['file']
-            speaker = row['transcript']
+            label_val = row['file_name']
+            speaker = row['file_name']
             if ds == 0:
                 fname = str(file_name.split('.wav')[0])
 
@@ -214,7 +223,7 @@ def process_files(df, image_dir, csv_dir, ds=0):
                         
             '''
 
-            jpname = str(fname + '.png')
+            jpname = fname #str(fname + '.png')
             img_path = os.path.join(fname + '.png')  # Save as PNG
             # labelled_dir = os.path.join(image_dir, str(label_val))
             # os.makedirs(labelled_dir) if not os.path.exists(labelled_dir) else None
@@ -452,11 +461,11 @@ elif dataset_choice == 10:
 elif dataset_choice == 11:
     print('--------------MSP_POD DATASET STARTED ---- ')
 
-    file_path = r'D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test\metadata.csv'
+    file_path = r'/media/carol/Data/DATASETS/Emotion_Datasets/Emotion_Speaker_Sets/MSP_Pod_OLD/missing_metadata.csv'
     df = pd.read_csv(file_path)
 
-    image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\noise_analysis\noisy'
+    image_dir = r'/media/carol/Data/DATASETS/Emotion_Datasets/Emotion_Speaker_Sets/MSP_Pod_OLD'
     os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\noise_analysis'
+    csv_dir = r'/media/carol/Data/DATASETS/Emotion_Datasets/Emotion_Speaker_Sets/MSP_Pod_OLD'
     os.makedirs(csv_dir, exist_ok=True)
     process_files(df, image_dir, csv_dir, 0)
