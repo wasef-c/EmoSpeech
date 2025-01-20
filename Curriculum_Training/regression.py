@@ -1,6 +1,3 @@
-# !git clone https://github.com/wasef-c/EmoSpeech.git
-# !pip install transformers[torch] torch datasets seaborn matplotlib scikit-learn
-# !pip install --upgrade Pillow
 
 import os
 import logging
@@ -40,15 +37,15 @@ output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
 
-column = "EmoAct"  # or "arousal", "score", etc.
+column =  "EmoDom" # "EmoVal" #"EmoAct"  # or "arousal", "score", etc.
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-BATCH_SIZE = 50
+BATCH_SIZE = 52
 LEARNING_RATE = 1e-5
-EPOCHS = 20
+EPOCHS = 52
 WEIGHT_DECAY = 0.01
-PATIENCE = 5
+PATIENCE = 10
 
 # Pre-trained model names (ViT + BERT)
 image_model_name = "google/vit-base-patch16-224"
@@ -202,10 +199,34 @@ lr_scheduler = get_scheduler(
     num_training_steps=num_training_steps,
 )
 
-criterion = nn.MSELoss()
+# import torch
+# import torch.nn as nn
+
+class CCCLoss(nn.Module):
+    def __init__(self):
+        super(CCCLoss, self).__init__()
+
+    def forward(self, y_pred, y_true):
+        y_true_mean = torch.mean(y_true)
+        y_pred_mean = torch.mean(y_pred)
+        
+        y_true_var = torch.var(y_true, unbiased=False)
+        y_pred_var = torch.var(y_pred, unbiased=False)
+        
+        covariance = torch.mean((y_true - y_true_mean) * (y_pred - y_pred_mean))
+        
+        ccc = (2 * covariance) / (
+            y_true_var + y_pred_var + (y_true_mean - y_pred_mean) ** 2 + 1e-8
+        )  # Adding epsilon to avoid division by zero
+        
+        loss = 1 - ccc
+        return loss
+
+
+criterion = CCCLoss()
 
 patience_counter = 0
-best_val_loss = float("inf")
+best_val_loss = 0 # float("inf")
 
 train_losses = []
 val_losses = []
@@ -282,16 +303,27 @@ for epoch in range(EPOCHS):
     train_losses.append(avg_train_loss)
     val_losses.append(avg_val_loss)
     epochs_list.append(epoch + 1)
+    metrics = compute_regression_metrics(all_predictions, all_labels)
 
-    print(f"Validation Loss: {avg_val_loss:.4f}")
+    print(f"Validation Loss: {avg_val_loss:.4f} Metrics: {metrics}")
 
     # Optional: compute regression metrics if you have them
     # metrics_dict = compute_regression_metrics(all_predictions, all_labels)
     # print(metrics_dict)
 
     # Early stopping based on validation loss
-    if avg_val_loss < best_val_loss:
-        best_val_loss = avg_val_loss
+    # if avg_val_loss < best_val_loss:
+    #     best_val_loss = avg_val_loss
+    #     patience_counter = 0
+    #     torch.save(model.state_dict(), best_model_path)
+    #     print("Validation loss improved. Saving best model and resetting patience counter.")
+    # else:
+    #     patience_counter += 1
+    #     if patience_counter >= PATIENCE:
+    #         print("Early stopping triggered. Stopping training.")
+    #         break
+    if metrics['CCC'] > best_val_loss:
+        best_val_loss = metrics['CCC']
         patience_counter = 0
         torch.save(model.state_dict(), best_model_path)
         print("Validation loss improved. Saving best model and resetting patience counter.")
@@ -330,7 +362,7 @@ with torch.no_grad():
             bert_input_ids=input_ids,
             bert_attention_mask=attention_mask
         )
-        predictions = outputs_dict["outputs"].squeeze(-1)
+        predictions = outputs_dict["logits"].squeeze(-1)
 
         loss = criterion(predictions, labels)
         test_loss += loss.item()
@@ -339,7 +371,9 @@ with torch.no_grad():
         all_test_labels.extend(labels.cpu().numpy())
 
 avg_test_loss = test_loss / len(test_loader)
-print(f"Test Loss: {avg_test_loss:.4f}")
+metrics = compute_regression_metrics(all_test_predictions, all_test_labels)
+
+print(f"Test Loss: {avg_test_loss:.4f} Metrics: {metrics}")
 
 # If you have your own regression metrics function:
 # test_metrics = compute_regression_metrics(all_test_predictions, all_test_labels)
@@ -348,7 +382,7 @@ print(f"Test Loss: {avg_test_loss:.4f}")
 # ----------------------------------------------------------------------
 # Save Final Results & Metadata
 # ----------------------------------------------------------------------
-final_metrics_str = f"Test Loss: {avg_test_loss:.4f}"
+final_metrics_str = f"Test Loss: {avg_test_loss:.4f} Metrics: {metrics}"
 save_training_metadata(
     output_dir=output_dir,
     pathstr=image_model_name,
@@ -360,7 +394,7 @@ save_training_metadata(
     column="label",
     metrics=final_metrics_str,
     speakers="N/A",
-    angry_weight=None,
+    angry_weight="CCC loss fn",
     happy_weight=None,
     neutral_weight=None,
     sad_weight=None,

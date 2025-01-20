@@ -40,9 +40,19 @@ from functions_old import *
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
+label_mapping = {
+    0: 'C',
+    1: 'N',
+    2: 'H',
+    3: 'S',
+    4: 'U',
+    5: 'F',
+    6: 'A',
+    7: 'D'
+}
 
 # Directories and Model Config
-base_dir = r"/media/carol/Data/Documents/Emo_rec/Notebooks/DINAT_BERT/MSPP_COMP/wav2vec"
+base_dir = r"./DinatWav2"
 output_dir = create_unique_output_dir(base_dir)
 os.makedirs(output_dir, exist_ok=True)
 
@@ -51,56 +61,47 @@ CHECKPOINT_PATH = "./NLPIMG_Model_001"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model_path = "shi-labs/dinat-mini-in1k-224"  # For processor loading if needed
-pretrain_model = "/media/carol/Data/Documents/Emo_rec/Trained Models/DINAT/MSPP_PRE/REGRESSION/GSAV/model"
+checkpoint_path = None #"./DinatCurriculum/Regression/Activation/EmoDom/20250117_1/best_model.pt"
 pretrain_model = model_path
 bert_model_name = "bert-base-uncased"
 BATCH_SIZE = 20
 
 # Load Dataset
-dataset_name = "cairocode/MSPP_POD_wav2vec3"
+dataset_name = "cairocode/MSP_POD_OLD_4"
 dataset = load_dataset(dataset_name)
-dataset = dataset['train']
 
-# Filter and Map Labels
-unique_values = set(dataset["EmoClass"])
-unique_values = [val for val in unique_values if val != "X"]
-num_labels = len(unique_values)
-label_mapping = {val: i for i, val in enumerate(unique_values)}
-label_mapping = {'D': 0, 'H': 1, 'A': 2, 'O': 3, 'N': 4, 'C': 5, 'F': 6, 'S': 7} #COMMENT OUT?
+# Reverse the mapping for efficient lookup
+reverse_label_mapping = {v: k for k, v in label_mapping.items()}
 
-dataset = dataset.filter(lambda example: example["EmoClass"] != "X")
+# Define a filtering function
+def is_mappable(example):
+    return example["EmoClass"] in reverse_label_mapping
 
-# Map label strings to integer IDs
-def encode_category(example):
-    example["label"] = label_mapping[example["EmoClass"]]
-    return example
+# Filter out rows with unmappable values
+filtered_dataset = dataset.filter(is_mappable)
 
-dataset = dataset.map(encode_category)
-def has_valid_transcript(example):
-    return example["transcript"] is not None
+# Map the filtered dataset to add the new column
+filtered_dataset = filtered_dataset.map(lambda x: {"label": reverse_label_mapping[x["EmoClass"]]})
 
-dataset = dataset.filter(has_valid_transcript)
 
-print("Mapping of categories to integers:", label_mapping)
+# Define a filtering function
+def is_valid_transcript(example):
+    return isinstance(example['transcript'], str)
 
-# Split by speaker (speaker-disjoint test set)
-unique_speakers = list(set(dataset["SpkrID"]))
-test_speaker_count = int(0.2 * len(unique_speakers))
-random.seed(42)
-test_speakers = set(random.sample(unique_speakers, test_speaker_count))
 
-test_dataset = dataset.filter(lambda x: x["SpkrID"] in test_speakers)
-training_set = dataset.filter(lambda x: x["SpkrID"] not in test_speakers)
+column  = "label"
+# Filter out non-string transcripts in each split
+filtered_dataset = filtered_dataset.filter(is_valid_transcript)
 
-# training_set = mapped_dataset.filter(lambda example: example["SpkrID"] not in test_speakers)
 
-# 3. Further split the training set into train/validation
-split_dataset = training_set.train_test_split(test_size=0.2, seed=42)
-train_dataset = split_dataset["train"]
-val_dataset = split_dataset["test"]
+train_test_split = filtered_dataset['train'].train_test_split(test_size=0.2, seed=42)
 
-print("Number of unique speakers:", len(unique_speakers))
-print("Test speaker count:", len(test_speakers))
+train_val_split = train_test_split['train'].train_test_split(test_size=0.2, seed=42)
+
+train_dataset = train_val_split['train']
+val_dataset = train_val_split['test']
+test_dataset = train_test_split['test']
+num_labels = 8
 print("Test dataset size:", len(test_dataset))
 print("Train dataset size:", len(train_dataset))
 
@@ -130,9 +131,6 @@ test_loader = DataLoader(
     collate_fn=collate_fn
 )
 
-# Class Weights
-class_weights = calculate_class_weights(train_dataset)
-class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
 
 # Load Models
 image_model = DinatForImageClassification.from_pretrained(
@@ -147,15 +145,49 @@ processor = DinatForImageClassification.from_pretrained(model_path).to(device)
 tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
 bert_model = BertModel.from_pretrained(bert_model_name).to(device)
 
-# Combined Model
-model = CombinedModelsDCCA(
+
+# ----------------------------------------------------------------------
+# Initialize the Combined Regression Model
+# ----------------------------------------------------------------------
+model = CombinedModelsBi(
     image_model=image_model,
     bert_model=bert_model,
     image_feature_dim=512,
     bert_embedding_dim=768,
-    num_labels=num_labels,
-    latent_dim=16,
+    combined_dim=512,
+    num_labels=1,
+
 ).to(device)
+
+if checkpoint_path != None:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    # # Option 1: Print each key on a separate line
+    # for key in checkpoint.keys():
+    #     print(key)
+
+    # # Define the keywords to include and exclude
+    include_keyword = "model"
+    exclude_keys = {
+        "image_model.classifier.weight",
+        "image_model.classifier.bias",
+        "fc3"
+    }
+
+    # Use dictionary comprehension to filter the keys
+    filtered_checkpoint = {
+        key: value for key, value in checkpoint.items()
+        if include_keyword in key and key not in exclude_keys
+    }
+
+    # # Optional: Verify the filtered keys
+    # print("Filtered keys to be loaded:")
+    # for key in filtered_checkpoint.keys():
+    #     print(f"- {key}")
+
+    # Load the filtered state dict
+    model.load_state_dict(filtered_checkpoint, strict=False)
+
 
 # model.load_state_dict(torch.load("/media/carol/Data/Documents/Emo_rec/Notebooks/DINAT_BERT/MSPP_COMP/20250105_11/best_model.pt"))
 #Mapping of categories to integers: {'D': 0, 'H': 1, 'A': 2, 'O': 3, 'N': 4, 'C': 5, 'F': 6, 'S': 7}
@@ -191,7 +223,7 @@ lr_scheduler = get_scheduler(
     num_training_steps=num_training_steps,
 )
 
-focal_loss = AdaptiveLearnableFocalLoss(class_weights=class_weights)
+focal_loss = AdaptiveLearnableFocalLoss()
 
 # Training Variables
 num_epochs = training_args.num_train_epochs
@@ -346,7 +378,16 @@ inv_label_mapping = {v: k for k, v in label_mapping.items()}
 
 # Step 2: Specify an order for the numeric labels
 ordered_labels_numeric = [0, 1, 2, 3, 4, 5, 6, 7]
-ordered_labels_str = [inv_label_mapping[i] for i in ordered_labels_numeric]
+ordered_labels_str = [label_mapping[i] for i in ordered_labels_numeric]
+
+# Suppose these are your test labels and predictions (as numeric):
+# all_test_labels = [...]
+# all_test_predictions = [...]
+
+
+# Step 2: Specify an order for the numeric labels
+ordered_labels_numeric = [0, 1, 2, 3, 4, 5, 6, 7]
+ordered_labels_str = [label_mapping[i] for i in ordered_labels_numeric]
 
 # Suppose these are your test labels and predictions (as numeric):
 # all_test_labels = [...]
@@ -356,7 +397,7 @@ ordered_labels_str = [inv_label_mapping[i] for i in ordered_labels_numeric]
 cm = confusion_matrix(
     y_true=all_test_labels, 
     y_pred=all_test_predictions, 
-    labels=ordered_labels_numeric
+    # labels=ordered_labels_numeric
 )
 
 # Step 4: Plot the confusion matrix with custom axis labels
@@ -384,7 +425,90 @@ save_training_metadata(
     output_dir=output_dir,
     pathstr=pretrain_model,
     dataset_name=dataset_name,
-    model_type="CombinedModel",
+    model_type="CombinedModelsDDCA",
+    super_loss_params="N/A",
+    speaker_disentanglement=True,
+    entropy=False,
+    column="label",
+    metrics=metrics_str,
+    weight_decay=training_args.weight_decay,
+    results=metrics_str
+)
+
+# Overall Metrics (if needed across multiple runs):
+# For a single run, these will just match the test metrics.
+overall_accuracy = test_accuracy
+overall_UAR = test_uar
+overall_F1 = test_f1
+full_accuracy = test_accuracy
+
+# Save final metrics
+output_file = os.path.join(output_dir, "metrics.txt")
+with open(output_file, "w") as f:
+    f.write(f"Overall F1 Score: {overall_F1:.4f}\n")
+    f.write(f"Overall Accuracy: {overall_accuracy:.4f}\n")
+    f.write(f"Full Accuracy: {full_accuracy:.4f}\n")
+    f.write(f"Overall UAR: {overall_UAR:.4f}\n")
+    f.write(f" Class Mapping :{label_mapping}\n")
+
+print(f"Metrics saved to {output_file}")
+
+
+
+# Step 1: Define your label mapping
+# label_mapping = {'D': 0, 'H': 1, 'A': 2, 'O': 3, 'N': 4, 'C': 5, 'F': 6, 'S': 7}
+inv_label_mapping = {v: k for k, v in label_mapping.items()}
+
+# Step 2: Specify an order for the numeric labels
+ordered_labels_numeric = [0, 1, 2, 3, 4, 5, 6, 7]
+ordered_labels_str = [label_mapping[i] for i in ordered_labels_numeric]
+
+# Suppose these are your test labels and predictions (as numeric):
+# all_test_labels = [...]
+# all_test_predictions = [...]
+
+
+# Step 2: Specify an order for the numeric labels
+ordered_labels_numeric = [0, 1, 2, 3, 4, 5, 6, 7]
+ordered_labels_str = [label_mapping[i] for i in ordered_labels_numeric]
+
+# Suppose these are your test labels and predictions (as numeric):
+# all_test_labels = [...]
+# all_test_predictions = [...]
+
+# Step 3: Generate the confusion matrix
+cm = confusion_matrix(
+    y_true=all_test_labels, 
+    y_pred=all_test_predictions, 
+    # labels=ordered_labels_numeric
+)
+
+# Step 4: Plot the confusion matrix with custom axis labels
+plt.figure(figsize=(8, 6))
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt="d",
+    cmap="Blues",
+    xticklabels=ordered_labels_str,
+    yticklabels=ordered_labels_str
+)
+plt.xlabel("Predicted Labels")
+plt.ylabel("True Labels")
+plt.title("Confusion Matrix")
+
+# Save and close
+save_path = os.path.join(output_dir, "confusion_matrix.png")
+plt.savefig(save_path, bbox_inches="tight", dpi=300)
+plt.close()
+print(f"Confusion matrix saved to: {save_path}")
+
+# Save Metadata
+save_training_metadata(
+    output_dir=output_dir,
+    pathstr=pretrain_model,
+    dataset_name=dataset_name,
+    model_type="CombinedModelsBi",
     super_loss_params="N/A",
     speaker_disentanglement=True,
     entropy=False,
