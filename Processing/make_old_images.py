@@ -128,6 +128,13 @@ def make_img(x, sr):
     contrast = librosa.feature.spectral_contrast(S=S, sr=sr)
     harm = librosa.effects.harmonic(x)
     tonnetz = librosa.feature.tonnetz(y=harm, sr=sr)
+    # Compute the Mel spectrogram
+    mel_spectrogram = librosa.feature.melspectrogram(
+        y=x, sr=sr, n_mels=128, n_fft=512, hop_length=256, fmax=sr/2
+    )
+
+    # Convert power to decibel scale for better visualization
+    mel_spectrogram_db = librosa.power_to_db(mel_spectrogram, ref=np.max)
 
     # Assuming snd, to_intensity, to_spectrogram, to_pitch, and pre_emphasize are defined
     mfccs = librosa.feature.mfcc(y=x, sr=sr, n_mfcc=40)
@@ -144,14 +151,15 @@ def make_img(x, sr):
     # Create a compressed 2x1 subplot grid with desired figsize
     # Adjust the figsize as needed
     fig, axes = plt.subplots(3, 2, figsize=(224/100, 224/100))
-    # fig, ax = plt.subplots(figsize=(224/100, 224/100))
+
+    # draw_lib(axes[0, 0], mel_spectrogram_db)
+    # draw_spectrogram(axes[0, 1], spectrogram)
 
     # Plot the first spectrogram on the top subplot
     # draw_spectrogram(ax, spectrogram)
     draw_spectrogram(axes[0, 0], spectrogram)
 
-    # # Plot the second spectrogram on the bottom subplot
-    draw_intensity(axes[0, 1], intensity)
+    draw_spectrogram(axes[0, 1], spectrogram_preemphasized)
 
     draw_lib(axes[1, 0], mfccs)
     draw_lib(axes[1, 1], chroma)
@@ -166,6 +174,7 @@ def make_img(x, sr):
 
     # Drawing the canvas
     fig.canvas.draw()
+    plt.close(fig)
 
     # Getting the pixel data without the border
     data = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
@@ -176,17 +185,18 @@ def make_img(x, sr):
     return data
 
 
-def process_files(df, image_dir, csv_dir, ds=0):
+def process_files(df, image_dir, audio_dir, csv_dir, ds=0):
     os.makedirs(image_dir, exist_ok=True)
     csv_file = os.path.join(csv_dir, 'file_labels.csv')
 
     # Keep track of existing files
     existing_files = set()
     if os.path.exists(csv_file):
-        with open(csv_file, 'r', newline='') as csvfile:
+        with open(csv_file, 'r', encoding='utf-8', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 existing_files.add(row['file_name'])
+
     j = 0
 
     with open(csv_file, 'a', newline='', encoding='utf-8') as csvfile:
@@ -197,10 +207,9 @@ def process_files(df, image_dir, csv_dir, ds=0):
             writer.writeheader()
 
         for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing audio files"):
-            file_path = os.path.join(
-                r"D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test", row['file_name'])
+            file_path = os.path.join(audio_dir, row['file_name'])
             file_name = row['file_name']
-            label_val = row['file']
+            label_val = row['file_name']
             speaker = row['transcript']
             if ds == 0:
                 fname = str(file_name.split('.wav')[0])
@@ -452,11 +461,25 @@ elif dataset_choice == 10:
 elif dataset_choice == 11:
     print('--------------MSP_POD DATASET STARTED ---- ')
 
-    file_path = r'D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test\metadata.csv'
+    file_path = r'D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\Audios\metadata.csv'
     df = pd.read_csv(file_path)
 
-    image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\test_old_set'
+    image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\Old_Mel'
     os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\test_old_set'
+    csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\Old_Mel'
     os.makedirs(csv_dir, exist_ok=True)
     process_files(df, image_dir, csv_dir, 0)
+
+
+elif dataset_choice == 12:
+
+    print('--------------MSP_POD TEST DATASET STARTED ---- ')
+
+    file_path = r'D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test\metadata.csv'
+    df = pd.read_csv(file_path)
+    audio_dir = r"D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\test"
+    image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\TEST_oldfeats'
+    os.makedirs(image_dir, exist_ok=True)
+    csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\TEST_oldfeats'
+    os.makedirs(csv_dir, exist_ok=True)
+    process_files(df, image_dir, audio_dir, csv_dir, 0)
