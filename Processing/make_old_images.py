@@ -152,14 +152,14 @@ def make_img(x, sr):
     # Adjust the figsize as needed
     fig, axes = plt.subplots(3, 2, figsize=(224/100, 224/100))
 
-    # draw_lib(axes[0, 0], mel_spectrogram_db)
-    # draw_spectrogram(axes[0, 1], spectrogram)
+    draw_lib(axes[0, 0], mel_spectrogram_db)
+    draw_spectrogram(axes[0, 1], spectrogram)
 
     # Plot the first spectrogram on the top subplot
     # draw_spectrogram(ax, spectrogram)
-    draw_spectrogram(axes[0, 0], spectrogram)
+    # draw_spectrogram(axes[0, 0], spectrogram)
 
-    draw_spectrogram(axes[0, 1], spectrogram_preemphasized)
+    # draw_spectrogram(axes[0, 1], spectrogram_preemphasized)
 
     draw_lib(axes[1, 0], mfccs)
     draw_lib(axes[1, 1], chroma)
@@ -267,208 +267,52 @@ print("11. MSP_POD")
 
 
 # Get user input for dataset choice
-dataset_choice = int(
-    input("Enter the number of the dataset you would like to run: "))
-
+# dataset_choice = int(
+#     input("Enter the number of the dataset you would like to run: "))
+dataset_choice = 2
 
 if dataset_choice == 1:
 
     # CMU MOSEI
-    print('--------------CMU-MOSEI DATASET STARTED ---- ')
-
-    file_path = '/home/carol/Documents/Emo_rec/CSV_FILES/CMUmini_data.csv'
-
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/CMUmini/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/CMUmini'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    ################################################################################
-
-elif dataset_choice == 2:
-
-    # CREMA -D
-    print('--------------CREMA-D DATASET STARTED ---- ')
-
-    file_path = '/home/carol/Documents/Emo_rec/CSV_FILES/CREMA_data.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/CREMA/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/CREMA'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    # DONE
-
-elif dataset_choice == 3:
-
-    ################################################################################
-
     print('--------------EMOV-DB DATASET STARTED ---- ')
 
-    file_path = '/home/carol/Documents/Emo_rec/CSV_FILES/EMOV_data.csv'
-    df = pd.read_csv(file_path)
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/EMOV/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/EMOV'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    #################################################################################
-elif dataset_choice == 4:
-
-    print('--------------MSP IMPROV DATASET STARTED ---- ')
-
-    file_path = 'G:\My Drive\MaSc\emo_rec\CSV_FILES\MSPIMPROV_FINAL.csv'
+    file_path = r'D:\Documents\MASC\EMOV_DB\New_Folders\metadata.csv'
 
     df = pd.read_csv(file_path)
-    image_dir = r'G:\My Drive\MaSc\emo_rec\Saved_Sets/MSP_I/images'
+
+    image_dir = r'D:\Documents\MASC\EMOV_DB\Image_DS'
     os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'G:\My Drive\MaSc\emo_rec\Saved_Sets/MSP_I/annotations.csv'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    # test_path = '/home/carol/Documents/Emo_rec/CSV_FILES/MSP_M01F03.csv'
-
-    # df = pd.read_csv(test_path)
-    # image_dir = r'/media/carol/Data/DATASETS/SavedSets002/MSP_Test/images'
-    # os.makedirs(image_dir, exist_ok=True)
-    # csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/MSP_Test'
-    # os.makedirs(csv_dir, exist_ok=True)
-    # process_files(df, image_dir, csv_dir)
-
-    #################################################################################
-elif dataset_choice == 5:
-
-    print('--------------RAVDESS-DB DATASET STARTED ---- ')
-
-    file_path = '/home/carol/Documents/Emo_rec/CSV_FILES/RAVDESS_data.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/RAVDESS/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/RAVDESS'
+    csv_dir = r'D:\Documents\MASC\EMOV_DB\Image_DS\metadata.csv'
     os.makedirs(csv_dir, exist_ok=True)
     process_files(df, image_dir, csv_dir)
 
     #################################################################################
 
 
-elif dataset_choice == 6:
+elif dataset_choice == 2:
+    print('--------------EMOV DATASET STARTED ---- ')
 
-    print('--------------TESS-DB DATASET STARTED ---- ')
-
-    file_path = '/home/carol/Documents/Emo_rec/CSV_FILES/TESS_data.csv'
+    file_path = r'D:\Documents\MASC\EMOV_DB\New_Folders\metadata.csv'
     df = pd.read_csv(file_path)
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/TESS/images'
+    audio_dir = r"D:\Documents\MASC\EMOV_DB\New_Folders"
+    image_dir = r'D:\Documents\MASC\EMOV_DB\Image_DS'
     os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/TESS'
+    csv_dir = r'D:\Documents\MASC\EMOV_DB\Image_DS'
     os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    #################################################################################
-
-elif dataset_choice == 7:
-
-    print('--------------VIVAE-DB DATASET STARTED ---- ')
-
-    file_path = '/home/carol/Documents/Emo_rec/CSV_FILES/VIVAE_data.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/VIVAE/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/VIVAE'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    #################################################################################
+    process_files(df, image_dir, audio_dir, csv_dir, 0)
 
 
-elif dataset_choice == 8:
-
-    print('--------------IEMOCAP DATASET STARTED ---- ')
-
-    file_path = '/media/carol/Data/Documents/Emo_rec/CSV_FILES/IEMOCAP_data_Full.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/IEMOCAP_V2/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/IEMOCAP_V2'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    #################################################################################
-elif dataset_choice == 9:
-
-    print('--------------ASVP-ESD DATASET STARTED ---- ')
-
-    file_path = '/home/carol/Documents/Emo_rec/CSV_FILES/ASVP_data.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/ASVP/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/Archive/ASVP'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir)
-
-    #################################################################################
-
-
-elif dataset_choice == 10:
-
-    print('--------------CUSTOM DATASET STARTED ---- ')
-
-    file_path = '/media/carol/Data/Documents/Emo_rec/CSV_FILES/OMG_Train.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/OMG_Train2/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/OMG_Train2'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir, 9)
-
-#     #################################################################################
-
-    print('--------------CUSTOM DATASET STARTED ---- ')
-
-    file_path = '/media/carol/Data/Documents/Emo_rec/CSV_FILES/OMG_Test.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/OMG_Test2/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/OMG_Test2'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir, 9)
-
-#     #################################################################################
-
-    print('--------------CUSTOM DATASET STARTED ---- ')
-
-    file_path = '/media/carol/Data/Documents/Emo_rec/CSV_FILES/OMG_Val.csv'
-    df = pd.read_csv(file_path)
-
-    image_dir = r'/media/carol/Data/DATASETS/SavedSets002/OMG_Val2/images'
-    os.makedirs(image_dir, exist_ok=True)
-    csv_dir = r'/media/carol/Data/DATASETS/SavedSets002/OMG_Val2'
-    os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir, 9)
-
-    #################################################################################
 elif dataset_choice == 11:
     print('--------------MSP_POD DATASET STARTED ---- ')
 
     file_path = r'D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\Audios\metadata.csv'
     df = pd.read_csv(file_path)
-
+    audio_dir = r"D:\Documents\MASC\MSP_POD_dataset\Audios\Audios.tar\Audios"
     image_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\Old_Mel'
     os.makedirs(image_dir, exist_ok=True)
     csv_dir = r'D:\Documents\MASC\MSP_POD_dataset\Image_DS\Old_Mel'
     os.makedirs(csv_dir, exist_ok=True)
-    process_files(df, image_dir, csv_dir, 0)
+    process_files(df, image_dir, audio_dir, csv_dir, 0)
 
 
 elif dataset_choice == 12:
