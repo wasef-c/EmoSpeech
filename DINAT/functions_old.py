@@ -110,7 +110,7 @@ def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(device)
     input_ids = torch.stack([example["input_ids"] for example in examples]).to(device)
     attention_mask = torch.stack([example["attention_mask"] for example in examples]).to(device)
-    labels = torch.tensor([example[column] for example in examples]).to(device)
+    labels = torch.tensor([example["label"] for example in examples]).to(device)
     bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
 
 
@@ -922,7 +922,14 @@ class CombinedModelsBi(nn.Module):
         # 5) Combine and feed into your MLP
         # --------------------------------------------
         # Concatenate => shape (B, 512 + 512 = 1024)
-        combined_features = torch.cat([image_vector, text_vector], dim=1)
+        # Instead of equal concatenation
+        ''' NEW SECTION !!!!'''
+        alpha = 1.5  # Adjust this value to control image importance (>1 gives more weight to image)
+        weighted_image_vector = image_vector * alpha
+        combined_features = torch.cat([weighted_image_vector, text_vector], dim=1)
+
+
+        # combined_features = torch.cat([image_vector, text_vector], dim=1)
         combined_features = self.dropout(combined_features)
 
         # Pass through fc layers with residual

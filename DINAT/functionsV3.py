@@ -1487,7 +1487,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 import os
 
-def plot_and_save_confusion_matrix(all_labels, all_predictions, ordered_labels_str, output_dir, epoch=None):
+def plot_and_save_confusion_matrix(all_labels, all_predictions, ordered_labels_str, output_dir, epoch=None, filename = "confusion_matrix.png"):
 
     # Step 1: Calculate the confusion matrix
     cm = confusion_matrix(y_true=all_labels, y_pred=all_predictions)
@@ -1516,12 +1516,61 @@ def plot_and_save_confusion_matrix(all_labels, all_predictions, ordered_labels_s
 
     # Step 4: Save the plot
     if epoch == None:
-        save_path = os.path.join(output_dir, f"confusion_matrix.png")
+        save_path = os.path.join(output_dir, filename)
     else:
         save_path = os.path.join(output_dir, f"Epoch{epoch}_val_confusion_matrix.png")
     os.makedirs(output_dir, exist_ok=True)
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()  # Close the figure to free up memory
     print(f"Confusion matrix saved to: {save_path}")
+
+
+
+
+def create_unique_output_dir(base_output_dir: str) -> str:
+    """
+    Creates a unique output directory appended with the current date and an incremented identifier.
+    
+    Args:
+        base_output_dir (str): The base directory where the new folder should be created.
+        
+    Returns:
+        str: The path of the newly created unique output directory.
+    """
+    # Get the current date in YYYYMMDD format
+    date_str = datetime.now().strftime("%Y%m%d")
+
+    # Get a list of existing directories in the base output directory
+    if not os.path.exists(base_output_dir):
+        os.makedirs(base_output_dir)
+
+    existing_dirs = [
+        d for d in os.listdir(base_output_dir)
+        if os.path.isdir(os.path.join(base_output_dir, d))
+    ]
+
+    # Filter for directories that start with the current date string
+    matching_dirs = [
+        d for d in existing_dirs
+        if d.startswith(date_str) and "_" in d and d.split("_")[-1].isdigit()
+    ]
+
+    # Determine the next numerical identifier
+    if matching_dirs:
+        last_num = max(int(d.split("_")[-1]) for d in matching_dirs)
+        new_num = last_num + 1
+    else:
+        new_num = 1
+
+    # Construct the new unique directory path
+    unique_output_dir = os.path.join(base_output_dir, f"{date_str}_{new_num}")
+
+    # Create the directory
+    os.makedirs(unique_output_dir, exist_ok=True)
+
+    return unique_output_dir
+
+# Example usage:
+# matrix_path = save_confusion_matrix(outputs, dataset_train, new_model_path)
 
 

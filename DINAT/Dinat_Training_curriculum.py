@@ -92,7 +92,7 @@ def is_mappable(example):
 filtered_dataset = dataset.filter(is_mappable)
 
 # Map the filtered dataset to add the new column
-filtered_dataset = filtered_dataset.map(lambda x: {"label": reverse_label_mapping[x["EmoClass"]]})
+filtered_dataset = filtered_dataset.map(lambda x: {"label": reverse_label_mapping[x[column]]})
 
 
 # Define a filtering function
