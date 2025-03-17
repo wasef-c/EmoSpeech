@@ -16,7 +16,14 @@ from scipy.special import lambertw  # Add this import at the top of your file
 from sklearn.cross_decomposition import CCA
 
 from typing import Dict  # Add this import
-from transformers import AutoImageProcessor, DinatForImageClassification, TrainingArguments, Trainer, AutoTokenizer, AutoModel
+from transformers import (
+    AutoImageProcessor,
+    DinatForImageClassification,
+    TrainingArguments,
+    Trainer,
+    AutoTokenizer,
+    AutoModel,
+)
 from sklearn.utils.class_weight import compute_class_weight
 from collections import OrderedDict
 import random
@@ -24,16 +31,18 @@ import numpy as np
 from datasets import concatenate_datasets
 from transformers import MarianMTModel, MarianTokenizer
 from transformers import pipeline
+from collections import defaultdict
 
 
-'''
+"""
 (C)	Mohammad Haghighat, University of Miami
 %       haghighat@ieee.org
 %       PLEASE CITE THE ABOVE PAPER IF YOU USE THIS CODE.
-'''
+"""
 # Initialize the image processor and BERT tokenizer
 
 from sklearn.metrics import r2_score
+
 
 def concordance_correlation_coefficient(x, y):
     """
@@ -56,7 +65,6 @@ def concordance_correlation_coefficient(x, y):
     return numerator / denominator if denominator != 0 else 0.0
 
 
-
 image_processor = AutoImageProcessor.from_pretrained("shi-labs/dinat-mini-in1k-224")
 tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
@@ -69,8 +77,11 @@ global bert_model
 bert_model_name = "bert-base-uncased"
 tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
 bert_model = AutoModel.from_pretrained(bert_model_name).to(device)
+
+
 def filter_m_examples(example):
-    return example["label"] != 4 and example["label"] != 5 
+    return example["label"] != 4 and example["label"] != 5
+
 
 # Data Transformations
 # Data Transformations
@@ -82,11 +93,11 @@ def compute_bert_embeddings(transcripts):
         padding=True,
         truncation=True,
         max_length=128,
-        return_attention_mask=True  # Ensure the attention mask is returned
+        return_attention_mask=True,  # Ensure the attention mask is returned
     )
     # Move the inputs to the device (e.g., GPU if available)
     inputs = {key: value.to(device) for key, value in inputs.items()}
-    
+
     # Get the BERT embeddings without gradient computation
     with torch.no_grad():
         outputs = bert_model(**inputs)
@@ -99,32 +110,33 @@ def compute_bert_embeddings(transcripts):
 
 
 def get_transforms(new_size=224):
-    return Compose([
-        Resize((new_size, new_size)),
-        ToTensor()
-    ])
+    return Compose([Resize((new_size, new_size)), ToTensor()])
+
 
 # Custom Collate Function
 def collate_fn(examples):
     """
     Custom collate function to handle batching of image data and BERT inputs.
     """
-    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(device)
+    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(
+        device
+    )
     input_ids = torch.stack([example["input_ids"] for example in examples]).to(device)
-    attention_mask = torch.stack([example["attention_mask"] for example in examples]).to(device)
+    attention_mask = torch.stack(
+        [example["attention_mask"] for example in examples]
+    ).to(device)
     labels = torch.tensor([example[column] for example in examples]).to(device)
-    bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
-
-
+    bert_embeddings = torch.stack(
+        [example["bert_embeddings"] for example in examples]
+    ).to(device)
 
     return {
         "pixel_values": pixel_values,
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "labels": labels,
-        "bert_embeddings":bert_embeddings
+        "bert_embeddings": bert_embeddings,
     }
-
 
 
 _test_transforms = Compose(
@@ -139,20 +151,16 @@ _test_transforms = Compose(
 
 
 def test_transforms(examples):
-    examples['pixel_values'] = [_test_transforms(image.convert("RGB")) for image in examples['image']]
+    examples["pixel_values"] = [
+        _test_transforms(image.convert("RGB")) for image in examples["image"]
+    ]
     return examples
 
 
 # Define Transformations
-_train_transforms = Compose([
-    Resize((224, 224)),
-    ToTensor()
-])
+_train_transforms = Compose([Resize((224, 224)), ToTensor()])
 
-_val_transforms = Compose([
-    Resize((224, 224)),
-    ToTensor()
-])
+_val_transforms = Compose([Resize((224, 224)), ToTensor()])
 
 # Load translation models
 src_to_tgt_model_name = "Helsinki-NLP/opus-mt-en-de"  # English to German
@@ -189,7 +197,7 @@ import random
 #         src_to_tgt_inputs = src_to_tgt_tokenizer.encode(text, return_tensors="pt", max_length=512, truncation=True)
 #         tgt_translation = src_to_tgt_model.generate(src_to_tgt_inputs, max_length=512, num_beams=5, early_stopping=True)
 #         tgt_text = src_to_tgt_tokenizer.decode(tgt_translation[0], skip_special_tokens=True)
-    
+
 #         # Translate back to source language (e.g., German to English)
 #         tgt_to_src_inputs = tgt_to_src_tokenizer.encode(tgt_text, return_tensors="pt", max_length=512, truncation=True)
 #         src_translation = tgt_to_src_model.generate(tgt_to_src_inputs, max_length=512, num_beams=5, early_stopping=True)
@@ -215,7 +223,6 @@ import random
 #     # Translate French back to English
 #     back_to_en = fr_to_en(translated_to_fr)[0]['translation_text']
 #     return back_to_en
-
 
 
 # def train_transforms(examples):
@@ -251,41 +258,45 @@ import random
 #     return examples
 
 
-
 def train_transforms(examples):
     # print("train transform: ", examples)
 
     # Use the image processor to process the images
     # processed_images = [image_processor(image.convert("RGB"))["pixel_values"].squeeze(0) for image in examples['image']]
-    processed_images = [_train_transforms(image.convert("RGB")) for image in examples['image']]
+    processed_images = [
+        _train_transforms(image.convert("RGB")) for image in examples["image"]
+    ]
 
     # Use the BERT tokenizer for transcripts
-    transcripts = examples['transcript']
-    bert_embeddings, attention_mask, input_ids= compute_bert_embeddings(transcripts)
+    transcripts = examples["transcript"]
+    bert_embeddings, attention_mask, input_ids = compute_bert_embeddings(transcripts)
 
-    examples['pixel_values'] = processed_images
-    examples['bert_embeddings'] = bert_embeddings
-    examples['attention_mask'] = attention_mask
-    examples['input_ids'] = input_ids
-
+    examples["pixel_values"] = processed_images
+    examples["bert_embeddings"] = bert_embeddings
+    examples["attention_mask"] = attention_mask
+    examples["input_ids"] = input_ids
 
     # print("after transform", examples)
     return examples
 
+
 def val_transforms(examples):
     # Use the image processor to process the images
     # processed_images = [image_processor(image.convert("RGB"), return_tensors="pt")["pixel_values"].squeeze(0) for image in examples['image']]
-    processed_images = [_train_transforms(image.convert("RGB")) for image in examples['image']]
+    processed_images = [
+        _train_transforms(image.convert("RGB")) for image in examples["image"]
+    ]
 
     # Use the BERT tokenizer for transcripts
-    transcripts = examples['transcript']
-    bert_embeddings, attention_mask, input_ids= compute_bert_embeddings(transcripts)
+    transcripts = examples["transcript"]
+    bert_embeddings, attention_mask, input_ids = compute_bert_embeddings(transcripts)
 
-    examples['pixel_values'] = processed_images
-    examples['bert_embeddings'] = bert_embeddings
-    examples['attention_mask'] = attention_mask
-    examples['input_ids'] = input_ids
+    examples["pixel_values"] = processed_images
+    examples["bert_embeddings"] = bert_embeddings
+    examples["attention_mask"] = attention_mask
+    examples["input_ids"] = input_ids
     return examples
+
 
 # Custom Dataset and Sampler
 class CustomDataset(Dataset):
@@ -297,17 +308,18 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.dataset[idx]
-    
+
 
 class CustomSampler(Sampler):
-    def __init__(self, data_source):
+    def __init__(self, data_source,column):
         self.data_source = data_source
         self.num_samples = len(self.data_source)
+        self.column = column 
 
     def _create_group_indices(self, shuffled_indices):
         group_indices = {}
         for idx in shuffled_indices:
-            speaker_id = self.data_source[idx]['SpkrID']
+            speaker_id = self.data_source[idx][self.column]
             if speaker_id not in group_indices:
                 group_indices[speaker_id] = []
             group_indices[speaker_id].append(idx)
@@ -317,13 +329,13 @@ class CustomSampler(Sampler):
         # Shuffle the entire dataset initially
         shuffled_indices = list(range(self.num_samples))
         random.shuffle(shuffled_indices)
-        
+
         # Group the shuffled indices by speakerID
         self.group_indices = self._create_group_indices(shuffled_indices)
-        
+
         # Shuffle the groups
         random.shuffle(self.group_indices)
-        
+
         # Flatten indices after shuffling groups
         final_indices = [idx for group in self.group_indices for idx in group]
         return iter(final_indices)
@@ -331,9 +343,11 @@ class CustomSampler(Sampler):
     def __len__(self):
         return self.num_samples
 
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 class CrossAttentionLayer(nn.Module):
     def __init__(self, query_dim, embed_dim, num_heads, dropout_prob=0.1):
@@ -342,7 +356,9 @@ class CrossAttentionLayer(nn.Module):
         self.key_proj = nn.Linear(embed_dim, embed_dim)
         self.value_proj = nn.Linear(embed_dim, embed_dim)
 
-        self.multihead_attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout_prob,  batch_first=True)
+        self.multihead_attn = nn.MultiheadAttention(
+            embed_dim, num_heads, dropout=dropout_prob, batch_first=True
+        )
         self.layer_norm = nn.LayerNorm(embed_dim)
         self.dropout = nn.Dropout(dropout_prob)
 
@@ -352,11 +368,14 @@ class CrossAttentionLayer(nn.Module):
         key = self.key_proj(key)
         value = self.value_proj(value)
         # Apply multihead attention
-        attn_output, _ = self.multihead_attn(query, key, value, attn_mask=attention_mask)
+        attn_output, _ = self.multihead_attn(
+            query, key, value, attn_mask=attention_mask
+        )
 
         # Residual connection and layer normalization
         output = self.layer_norm(query + self.dropout(attn_output))
         return output
+
 
 class GeMPooling(nn.Module):
     def __init__(self, p=3, eps=1e-6):
@@ -368,9 +387,12 @@ class GeMPooling(nn.Module):
         # Permute to (batch_size, channels, height, width)
         x = x.permute(0, 3, 1, 2)
         # Apply GeM pooling
-        pooled = torch.mean(x.clamp(min=self.eps).pow(self.p), dim=(2, 3)).pow(1.0 / self.p)
+        pooled = torch.mean(x.clamp(min=self.eps).pow(self.p), dim=(2, 3)).pow(
+            1.0 / self.p
+        )
         return pooled
-    
+
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -392,6 +414,7 @@ import torch.nn.functional as F
 
 import torch
 import torch.nn as nn
+
 
 class DCCALoss(nn.Module):
     def __init__(self, latent_dim, epsilon=1e-8):
@@ -413,8 +436,12 @@ class DCCALoss(nn.Module):
         view2 -= view2.mean(dim=0)
 
         # Covariance matrices
-        cov_11 = torch.mm(view1.T, view1) / (batch_size - 1) + self.epsilon * torch.eye(self.latent_dim).to(view1.device)
-        cov_22 = torch.mm(view2.T, view2) / (batch_size - 1) + self.epsilon * torch.eye(self.latent_dim).to(view2.device)
+        cov_11 = torch.mm(view1.T, view1) / (batch_size - 1) + self.epsilon * torch.eye(
+            self.latent_dim
+        ).to(view1.device)
+        cov_22 = torch.mm(view2.T, view2) / (batch_size - 1) + self.epsilon * torch.eye(
+            self.latent_dim
+        ).to(view2.device)
         cov_12 = torch.mm(view1.T, view2) / (batch_size - 1)
 
         # Eigen decomposition for canonical correlation
@@ -422,18 +449,31 @@ class DCCALoss(nn.Module):
         eigvals_2, eigvecs_2 = torch.linalg.eigh(cov_22)
 
         # Whiten the covariance matrices
-        cov_11_whitened = eigvecs_1 @ torch.diag(torch.sqrt(1.0 / eigvals_1)) @ eigvecs_1.T
-        cov_22_whitened = eigvecs_2 @ torch.diag(torch.sqrt(1.0 / eigvals_2)) @ eigvecs_2.T
+        cov_11_whitened = (
+            eigvecs_1 @ torch.diag(torch.sqrt(1.0 / eigvals_1)) @ eigvecs_1.T
+        )
+        cov_22_whitened = (
+            eigvecs_2 @ torch.diag(torch.sqrt(1.0 / eigvals_2)) @ eigvecs_2.T
+        )
 
         T = cov_11_whitened @ cov_12 @ cov_22_whitened
         _, singular_values, _ = torch.svd(T)
 
         # Return the negative sum of canonical correlations
-        return -torch.sum(singular_values[:self.latent_dim])
+        return -torch.sum(singular_values[: self.latent_dim])
 
 
 class CombinedModelsDCCA(nn.Module):
-    def __init__(self, image_model, bert_model, image_feature_dim, bert_embedding_dim, latent_dim, num_labels, dropout_prob=0.1):
+    def __init__(
+        self,
+        image_model,
+        bert_model,
+        image_feature_dim,
+        bert_embedding_dim,
+        latent_dim,
+        num_labels,
+        dropout_prob=0.1,
+    ):
         super(CombinedModelsDCCA, self).__init__()
         self.image_model = image_model
         self.bert_model = bert_model
@@ -447,7 +487,7 @@ class CombinedModelsDCCA(nn.Module):
             nn.GELU(),
             nn.Linear(512, latent_dim),
         )
-        
+
         self.text_projection = nn.Sequential(
             nn.Linear(bert_embedding_dim, 512),
             nn.LayerNorm(512),
@@ -498,10 +538,17 @@ class CombinedModelsDCCA(nn.Module):
 # import torch.nn as nn
 # import torch.nn.functional as F
 
+
 class CombinedModelsDCCAE(nn.Module):
     def __init__(
-        self, image_model, bert_model, image_feature_dim, bert_embedding_dim,
-        latent_dim, num_labels, dropout_prob=0.1
+        self,
+        image_model,
+        bert_model,
+        image_feature_dim,
+        bert_embedding_dim,
+        latent_dim,
+        num_labels,
+        dropout_prob=0.1,
     ):
         super(CombinedModelsDCCAE, self).__init__()
 
@@ -521,29 +568,21 @@ class CombinedModelsDCCAE(nn.Module):
             nn.Linear(image_feature_dim, 512),
             nn.GELU(),
             # nn.BatchNorm1d(512),  # Add batch normalization
-            nn.Linear(512, latent_dim)
+            nn.Linear(512, latent_dim),
         )
 
         self.text_encoder = nn.Sequential(
-            nn.Linear(bert_embedding_dim, 512),
-            nn.GELU(),
-            nn.Linear(512, latent_dim)
+            nn.Linear(bert_embedding_dim, 512), nn.GELU(), nn.Linear(512, latent_dim)
         )
 
         # Decoders for reconstruction (DCCAE specific)
 
-
         self.image_decoder = nn.Sequential(
-            nn.Linear(latent_dim, 512),
-            nn.ReLU(),
-            nn.Linear(512, image_feature_dim)
+            nn.Linear(latent_dim, 512), nn.ReLU(), nn.Linear(512, image_feature_dim)
         )
 
-
         self.text_decoder = nn.Sequential(
-            nn.Linear(latent_dim, 512),
-            nn.ReLU(),
-            nn.Linear(512, bert_embedding_dim)
+            nn.Linear(latent_dim, 512), nn.ReLU(), nn.Linear(512, bert_embedding_dim)
         )
 
         # Classification layers
@@ -562,7 +601,6 @@ class CombinedModelsDCCAE(nn.Module):
 
         image_features = image_features.view(image_features.size(0), -1)
 
-
         # Process text (BERT) features
         bert_outputs = self.bert_model(
             input_ids=bert_input_ids,
@@ -578,7 +616,6 @@ class CombinedModelsDCCAE(nn.Module):
         print(image_latent.mean(), image_latent.std())
         print(text_latent.mean(), text_latent.std())
 
-
         # Decode for reconstruction
         image_reconstructed = self.image_decoder(image_latent)
         text_reconstructed = self.text_decoder(text_latent)
@@ -588,8 +625,9 @@ class CombinedModelsDCCAE(nn.Module):
         reconstruction_loss = None
         if labels is not None:
             dcca_loss = self.dcca_loss(image_latent, text_latent)
-            reconstruction_loss = F.mse_loss(image_reconstructed, image_features) + \
-                                 F.mse_loss(text_reconstructed, bert_embeddings)
+            reconstruction_loss = F.mse_loss(
+                image_reconstructed, image_features
+            ) + F.mse_loss(text_reconstructed, bert_embeddings)
 
         # Concatenate and classify
         combined_latent = torch.cat([image_latent, text_latent], dim=1)
@@ -599,7 +637,7 @@ class CombinedModelsDCCAE(nn.Module):
         return {
             "logits": logits,
             "dcca_loss": dcca_loss,
-            "reconstruction_loss": reconstruction_loss
+            "reconstruction_loss": reconstruction_loss,
         }
 
 
@@ -619,6 +657,7 @@ class DCCALoss(nn.Module):
 
         return loss
 
+
 # Custom Loss Function
 class SuperLoss(nn.Module):
     def __init__(self, C, lam, batch_size, class_weights):
@@ -629,20 +668,28 @@ class SuperLoss(nn.Module):
         self.class_weights = class_weights
 
     def forward(self, logits, targets):
-        l_i = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights).detach()
+        l_i = F.cross_entropy(
+            logits, targets, reduction="none", weight=self.class_weights
+        ).detach()
         sigma = self.sigma(l_i)
-        loss = (F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights) - self.tau) * sigma
+        loss = (
+            F.cross_entropy(
+                logits, targets, reduction="none", weight=self.class_weights
+            )
+            - self.tau
+        ) * sigma
         return loss.mean()
 
     def sigma(self, l_i):
-        x = torch.ones_like(l_i) * (-2 / math.exp(1.))
+        x = torch.ones_like(l_i) * (-2 / math.exp(1.0))
         y = 0.5 * torch.max(x, (l_i - self.tau) / self.lam)
-        y = torch.clamp(y, min=-1.0, max=10.0) # MIGHT WANNA DELETE IDK
+        y = torch.clamp(y, min=-1.0, max=10.0)  # MIGHT WANNA DELETE IDK
 
         y = y.cpu().numpy()
         sigma = np.exp(-lambertw(y))
         sigma = torch.from_numpy(sigma.real.astype(np.float32)).to(l_i.device)
         return sigma
+
 
 class FocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2, class_weights=None):
@@ -653,21 +700,24 @@ class FocalLoss(nn.Module):
 
     def forward(self, logits, targets):
         # Compute Cross-Entropy Loss
-        ce_loss = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights)
-        
+        ce_loss = F.cross_entropy(
+            logits, targets, reduction="none", weight=self.class_weights
+        )
+
         # Compute the probability of the true class
         pt = torch.exp(-ce_loss)
-        
+
         # Compute Focal Loss
         focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
-        
+
         # Return mean loss
         return focal_loss.mean()
 
 
-
 class AdaptiveLearnableFocalLoss(nn.Module):
-    def __init__(self, alpha_init=1.0, gamma_init=2.0, learnable=True, class_weights=None):
+    def __init__(
+        self, alpha_init=1.0, gamma_init=2.0, learnable=True, class_weights=None
+    ):
         super(AdaptiveLearnableFocalLoss, self).__init__()
 
         # Learnable parameters for alpha and gamma
@@ -687,10 +737,15 @@ class AdaptiveLearnableFocalLoss(nn.Module):
     def forward(self, logits, targets):
         # Compute Cross-Entropy Loss with class weights
         if self.class_weights == None:
-                    ce_loss = F.cross_entropy(logits, targets, reduction='none')
+            ce_loss = F.cross_entropy(logits, targets, reduction="none")
 
         else:
-            ce_loss = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights.to(logits.device))
+            ce_loss = F.cross_entropy(
+                logits,
+                targets,
+                reduction="none",
+                weight=self.class_weights.to(logits.device),
+            )
         # Compute the probability of the true class (pt)
         pt = torch.exp(-ce_loss)
 
@@ -699,7 +754,9 @@ class AdaptiveLearnableFocalLoss(nn.Module):
         focal_loss = self.alpha * focal_term * ce_loss
 
         # Adaptive weighting between focal loss and cross-entropy loss
-        combined_loss = self.adaptive_factor * focal_loss + (1 - self.adaptive_factor) * ce_loss
+        combined_loss = (
+            self.adaptive_factor * focal_loss + (1 - self.adaptive_factor) * ce_loss
+        )
 
         return combined_loss.mean()
 
@@ -709,23 +766,23 @@ def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     predicted_classes = np.argmax(predictions, axis=1)
     accuracy = accuracy_score(labels, predicted_classes)
-    uar = recall_score(labels, predicted_classes, average='macro')
-    f1 = f1_score(labels, predicted_classes, average='macro')
+    uar = recall_score(labels, predicted_classes, average="macro")
+    f1 = f1_score(labels, predicted_classes, average="macro")
     kacc = top_k_accuracy_score(labels, predictions)
-    return {'accuracy': accuracy, 'uar': uar, 'f1': f1, 'top_k_acc': kacc}
+    return {"accuracy": accuracy, "uar": uar, "f1": f1, "top_k_acc": kacc}
 
 
 def calculate_class_weights(train_dataset, class_weight_multipliers=None):
-    labels = [sample['label'] for sample in train_dataset]
+    labels = [sample["label"] for sample in train_dataset]
     unique_classes = np.unique(labels)
-    class_weights = compute_class_weight('balanced', classes=unique_classes, y=labels)
-    
+    class_weights = compute_class_weight("balanced", classes=unique_classes, y=labels)
+
     class_weight_dict = dict(zip(unique_classes, class_weights))
     if class_weight_multipliers != None:
         for class_label, multiplier in class_weight_multipliers.items():
             if class_label in class_weight_dict:
                 class_weight_dict[class_label] *= multiplier
-    
+
     return [class_weight_dict[label] for label in unique_classes]
 
 
@@ -734,16 +791,14 @@ def save_training_metadata(
     Pretrain_file,
     dataset_name,
     model_type,
-    results, 
+    results,
     column,
     speaker_disentanglement,
     metrics,
     weight_decay,
     class_weights=None,
-    speakers = None,
-
-
-    ):
+    speakers=None,
+):
     """
     Save training metadata to a text file in the specified output directory.
     """
@@ -751,13 +806,13 @@ def save_training_metadata(
     os.makedirs(output_dir, exist_ok=True)
 
     # Define the file path for the metadata file
-    file_path = os.path.join(output_dir, 'training_metadata.txt')
+    file_path = os.path.join(output_dir, "training_metadata.txt")
 
     # Get the current date
     current_date = datetime.now().strftime("%Y-%m-%d")
 
     # Write the content to the file
-    with open(file_path, 'w') as file:
+    with open(file_path, "w") as file:
         file.write(f"Pretrain_file: {Pretrain_file}\n")
         file.write(f"Date: {current_date}\n")
         file.write(f"Dataset Used: {dataset_name}\n")
@@ -776,10 +831,10 @@ def save_training_metadata(
 def create_unique_output_dir(base_output_dir: str) -> str:
     """
     Creates a unique output directory appended with the current date and an incremented identifier.
-    
+
     Args:
         base_output_dir (str): The base directory where the new folder should be created.
-        
+
     Returns:
         str: The path of the newly created unique output directory.
     """
@@ -791,13 +846,15 @@ def create_unique_output_dir(base_output_dir: str) -> str:
         os.makedirs(base_output_dir)
 
     existing_dirs = [
-        d for d in os.listdir(base_output_dir)
+        d
+        for d in os.listdir(base_output_dir)
         if os.path.isdir(os.path.join(base_output_dir, d))
     ]
 
     # Filter for directories that start with the current date string
     matching_dirs = [
-        d for d in existing_dirs
+        d
+        for d in existing_dirs
         if d.startswith(date_str) and "_" in d and d.split("_")[-1].isdigit()
     ]
 
@@ -817,9 +874,6 @@ def create_unique_output_dir(base_output_dir: str) -> str:
     return unique_output_dir
 
 
-
-
-
 class CrossAttentionLayer(nn.Module):
     def __init__(self, query_dim, embed_dim, num_heads, dropout_prob=0.1):
         super(CrossAttentionLayer, self).__init__()
@@ -828,7 +882,8 @@ class CrossAttentionLayer(nn.Module):
         self.value_proj = nn.Linear(embed_dim, embed_dim)
 
         self.multihead_attn = nn.MultiheadAttention(
-            embed_dim, num_heads, dropout=dropout_prob,  batch_first=True)
+            embed_dim, num_heads, dropout=dropout_prob, batch_first=True
+        )
         self.layer_norm = nn.LayerNorm(embed_dim)
         self.dropout = nn.Dropout(dropout_prob)
 
@@ -839,12 +894,12 @@ class CrossAttentionLayer(nn.Module):
         value = self.value_proj(value)
         # Apply multihead attention
         attn_output, _ = self.multihead_attn(
-            query, key, value, attn_mask=attention_mask)
+            query, key, value, attn_mask=attention_mask
+        )
 
         # Residual connection and layer normalization
         output = self.layer_norm(query + self.dropout(attn_output))
         return output
-
 
 
 class BiCrossAttentionLayer(nn.Module):
@@ -855,39 +910,56 @@ class BiCrossAttentionLayer(nn.Module):
 
     Returns updated x1 and x2.
     """
+
     def __init__(self, dim1, dim2, embed_dim, num_heads, dropout_prob=0.1):
         super(BiCrossAttentionLayer, self).__init__()
         # 1->2 cross attention (unchanged)
         self.query_proj_12 = nn.Linear(dim1, embed_dim)
-        self.key_proj_12   = nn.Linear(dim2, embed_dim)
+        self.key_proj_12 = nn.Linear(dim2, embed_dim)
         self.value_proj_12 = nn.Linear(dim2, embed_dim)
-        self.attn_12 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout_prob, batch_first=True)
+        self.attn_12 = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout_prob,
+            batch_first=True,
+        )
         self.layer_norm_12 = nn.LayerNorm(embed_dim)
         self.dropout_12 = nn.Dropout(dropout_prob)
 
         # 2->1 cross attention
         self.query_proj_21 = nn.Linear(dim2, embed_dim)  # x2 (dim2 -> embed_dim)
-        self.key_proj_21   = nn.Linear(embed_dim, embed_dim)  # Updated x1 (embed_dim -> embed_dim)
-        self.value_proj_21 = nn.Linear(embed_dim, embed_dim)  # Updated x1 (embed_dim -> embed_dim)
-        self.attn_21 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout_prob, batch_first=True)
+        self.key_proj_21 = nn.Linear(
+            embed_dim, embed_dim
+        )  # Updated x1 (embed_dim -> embed_dim)
+        self.value_proj_21 = nn.Linear(
+            embed_dim, embed_dim
+        )  # Updated x1 (embed_dim -> embed_dim)
+        self.attn_21 = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout_prob,
+            batch_first=True,
+        )
         self.layer_norm_21 = nn.LayerNorm(embed_dim)
         self.dropout_21 = nn.Dropout(dropout_prob)
 
-    def forward(self, 
-                x1,   # (batch, seq_len1, dim1)
-                x2,   # (batch, seq_len2, dim2)
-                mask1=None,  # optional attention mask for pass 1
-                mask2=None): # optional attention mask for pass 2
-        
+    def forward(
+        self,
+        x1,  # (batch, seq_len1, dim1)
+        x2,  # (batch, seq_len2, dim2)
+        mask1=None,  # optional attention mask for pass 1
+        mask2=None,
+    ):  # optional attention mask for pass 2
+
         # --------------------------------------------------
         # 1) x1 -> x2 cross-attention
         #    - Query = x1
         #    - Key/Value = x2
         # --------------------------------------------------
         # Project each
-        q_12 = self.query_proj_12(x1)   # shape: (B, seq_len1, embed_dim)
-        k_12 = self.key_proj_12(x2)     # shape: (B, seq_len2, embed_dim)
-        v_12 = self.value_proj_12(x2)   # shape: (B, seq_len2, embed_dim)
+        q_12 = self.query_proj_12(x1)  # shape: (B, seq_len1, embed_dim)
+        k_12 = self.key_proj_12(x2)  # shape: (B, seq_len2, embed_dim)
+        v_12 = self.value_proj_12(x2)  # shape: (B, seq_len2, embed_dim)
 
         attn_out_12, _ = self.attn_12(q_12, k_12, v_12, attn_mask=mask1)
         # Residual + LayerNorm
@@ -901,7 +973,7 @@ class BiCrossAttentionLayer(nn.Module):
         # --------------------------------------------------
         # Usually, we let x2 attend to the *original* x1 or the updated_x1.
         # Common approach: use updated_x1 as K/V so that x2 sees the refined representation.
-        # If you prefer the original x1, just pass x1. 
+        # If you prefer the original x1, just pass x1.
         q_21 = self.query_proj_21(x2)
         k_21 = self.key_proj_21(updated_x1)
         v_21 = self.value_proj_21(updated_x1)
@@ -910,6 +982,7 @@ class BiCrossAttentionLayer(nn.Module):
         updated_x2 = self.layer_norm_21(q_21 + self.dropout_21(attn_out_21))
 
         return updated_x1, updated_x2
+
 
 class CombinedModelsBi(nn.Module):
     def __init__(
@@ -921,7 +994,7 @@ class CombinedModelsBi(nn.Module):
         combined_dim,
         num_labels,
         unfrozen_layers=None,  # List of layer numbers to unfreeze
-        dropout_prob=0.3
+        dropout_prob=0.3,
     ):
         super(CombinedModelsBi, self).__init__()
         self.image_model = image_model
@@ -934,12 +1007,13 @@ class CombinedModelsBi(nn.Module):
         # Iterate over BERT parameters
         for name, param in self.bert_model.named_parameters():
             # Check if the parameter belongs to one of the specified layers or the pooler
-            if any(f"encoder.layer.{layer}" in name for layer in unfrozen_layers) or "pooler" in name:
+            if (
+                any(f"encoder.layer.{layer}" in name for layer in unfrozen_layers)
+                or "pooler" in name
+            ):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
-
-
 
         self.gem_pooling = GeMPooling()
 
@@ -954,9 +1028,9 @@ class CombinedModelsBi(nn.Module):
         self.bi_cross_attn = BiCrossAttentionLayer(
             dim1=image_feature_dim,
             dim2=bert_embedding_dim,
-            embed_dim=512,   # internal dimension for cross-attention
+            embed_dim=512,  # internal dimension for cross-attention
             num_heads=4,
-            dropout_prob=0.1
+            dropout_prob=0.1,
         )
 
         # -------------------------
@@ -969,12 +1043,11 @@ class CombinedModelsBi(nn.Module):
         self.fc1 = nn.Sequential(
             nn.Linear(2 * 512, combined_dim),  # 512 + 512 = 1024
             nn.LayerNorm(combined_dim),
-            nn.ReLU()
+            nn.ReLU(),
         )
 
         self.fc2 = nn.Sequential(
-            nn.Linear(combined_dim, combined_dim),
-            nn.LayerNorm(combined_dim)
+            nn.Linear(combined_dim, combined_dim), nn.LayerNorm(combined_dim)
         )
 
         self.fc3 = nn.Linear(combined_dim, num_labels)
@@ -1002,7 +1075,7 @@ class CombinedModelsBi(nn.Module):
         bert_outputs = self.bert_model(
             input_ids=bert_input_ids,
             attention_mask=bert_attention_mask,
-            output_hidden_states=True
+            output_hidden_states=True,
         )
         bert_embeddings = bert_outputs.last_hidden_state
         # shape: (batch_size, seq_len, bert_embedding_dim)
@@ -1012,10 +1085,10 @@ class CombinedModelsBi(nn.Module):
         #    updated_image: (B, 1, embed_dim)
         #    updated_text:  (B, seq_len, embed_dim)
         # --------------------------------------------
-       
+
         updated_image, updated_text = self.bi_cross_attn(
-            x1=image_features,      # shape (B, 1, image_feature_dim)
-            x2=bert_embeddings      # shape (B, seq_len, bert_embedding_dim)
+            x1=image_features,  # shape (B, 1, image_feature_dim)
+            x2=bert_embeddings,  # shape (B, seq_len, bert_embedding_dim)
         )
 
         # --------------------------------------------
@@ -1075,41 +1148,47 @@ class GeMPooling(nn.Module):
 
         x = x.permute(0, 3, 1, 2)
         # Apply GeM pooling
-        pooled = torch.mean(x.clamp(min=self.eps).pow(
-            self.p), dim=(2, 3)).pow(1.0 / self.p)
+        pooled = torch.mean(x.clamp(min=self.eps).pow(self.p), dim=(2, 3)).pow(
+            1.0 / self.p
+        )
         return pooled
+
 
 def collate_fn_reg(examples, column):
     """
     Custom collate function to handle batching of image data and BERT inputs.
     """
-    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(device)
+    pixel_values = torch.stack([example["pixel_values"] for example in examples]).to(
+        device
+    )
     input_ids = torch.stack([example["input_ids"] for example in examples]).to(device)
-    attention_mask = torch.stack([example["attention_mask"] for example in examples]).to(device)
+    attention_mask = torch.stack(
+        [example["attention_mask"] for example in examples]
+    ).to(device)
     labels = torch.tensor([example[column] for example in examples]).to(device)
-    bert_embeddings = torch.stack([example["bert_embeddings"] for example in examples]).to(device)
-
-
+    bert_embeddings = torch.stack(
+        [example["bert_embeddings"] for example in examples]
+    ).to(device)
 
     return {
         "pixel_values": pixel_values,
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "labels": labels,
-        "bert_embeddings":bert_embeddings
+        "bert_embeddings": bert_embeddings,
     }
-    
+
 
 class AdaptiveLearnableFocalLoss(nn.Module):
-    def __init__(self, alpha_init=1.0, gamma_init=2.0, learnable=True, class_weights=None):
+    def __init__(
+        self, alpha_init=1.0, gamma_init=2.0, learnable=True, class_weights=None
+    ):
         super(AdaptiveLearnableFocalLoss, self).__init__()
 
         # Learnable parameters for alpha and gamma
         if learnable:
-            self.alpha = nn.Parameter(
-                torch.tensor(alpha_init, requires_grad=True))
-            self.gamma = nn.Parameter(
-                torch.tensor(gamma_init, requires_grad=True))
+            self.alpha = nn.Parameter(torch.tensor(alpha_init, requires_grad=True))
+            self.gamma = nn.Parameter(torch.tensor(gamma_init, requires_grad=True))
         else:
             self.alpha = torch.tensor(alpha_init)
             self.gamma = torch.tensor(gamma_init)
@@ -1118,8 +1197,7 @@ class AdaptiveLearnableFocalLoss(nn.Module):
         self.class_weights = class_weights
 
         # Adaptive weighting factor for focal and class-weighted loss
-        self.adaptive_factor = nn.Parameter(
-            torch.tensor(0.5, requires_grad=True))
+        self.adaptive_factor = nn.Parameter(torch.tensor(0.5, requires_grad=True))
 
     def forward(self, logits, targets):
         # Compute Cross-Entropy Loss with class weights
@@ -1127,10 +1205,15 @@ class AdaptiveLearnableFocalLoss(nn.Module):
         #     logits, targets, reduction='none', weight=self.class_weights.to(logits.device))
         # Compute Cross-Entropy Loss with class weights
         if self.class_weights == None:
-                    ce_loss = F.cross_entropy(logits, targets, reduction='none')
+            ce_loss = F.cross_entropy(logits, targets, reduction="none")
 
         else:
-            ce_loss = F.cross_entropy(logits, targets, reduction='none', weight=self.class_weights.to(logits.device))
+            ce_loss = F.cross_entropy(
+                logits,
+                targets,
+                reduction="none",
+                weight=self.class_weights.to(logits.device),
+            )
         # Compute probability of the true class (pt)
         pt = torch.exp(-ce_loss)
 
@@ -1139,14 +1222,17 @@ class AdaptiveLearnableFocalLoss(nn.Module):
         focal_loss = self.alpha * focal_term * ce_loss
 
         # Adaptive weighting between focal loss and cross-entropy loss
-        combined_loss = self.adaptive_factor * \
-            focal_loss + (1 - self.adaptive_factor) * ce_loss
+        combined_loss = (
+            self.adaptive_factor * focal_loss + (1 - self.adaptive_factor) * ce_loss
+        )
 
         return combined_loss.mean()
+
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 class AdaptiveLearnableFocalLoss_V2(nn.Module):
     """
@@ -1155,12 +1241,15 @@ class AdaptiveLearnableFocalLoss_V2(nn.Module):
       - Exponential reparameterization to keep alpha, gamma > 0
       - Optional mixture of focal loss and cross-entropy via adaptive_factor
     """
-    def __init__(self,
-                 num_classes: int,
-                 alpha_init: float = 1.0,
-                 gamma_init: float = 2.0,
-                 learnable: bool = True,
-                 class_weights: torch.Tensor = None):
+
+    def __init__(
+        self,
+        num_classes: int,
+        alpha_init: float = 1.0,
+        gamma_init: float = 2.0,
+        learnable: bool = True,
+        class_weights: torch.Tensor = None,
+    ):
         super(AdaptiveLearnableFocalLoss_V2, self).__init__()
 
         self.num_classes = num_classes
@@ -1181,14 +1270,14 @@ class AdaptiveLearnableFocalLoss_V2(nn.Module):
             alpha_vec = torch.ones(num_classes) * alpha_init
             gamma_vec = torch.ones(num_classes) * gamma_init
 
-            self.register_buffer('alpha', alpha_vec)
-            self.register_buffer('gamma', gamma_vec)
+            self.register_buffer("alpha", alpha_vec)
+            self.register_buffer("gamma", gamma_vec)
             self.log_alpha = None
             self.log_gamma = None
 
         # Adaptive mix factor in [0,1] between focal loss and cross-entropy
         self.adaptive_factor = nn.Parameter(torch.tensor(0.5))
-        
+
     def forward(self, logits, targets):
         """
         Args:
@@ -1203,15 +1292,11 @@ class AdaptiveLearnableFocalLoss_V2(nn.Module):
             ce_loss = F.cross_entropy(
                 logits,
                 targets,
-                reduction='none',
-                weight=self.class_weights.to(logits.device)
+                reduction="none",
+                weight=self.class_weights.to(logits.device),
             )
         else:
-            ce_loss = F.cross_entropy(
-                logits,
-                targets,
-                reduction='none'
-            )
+            ce_loss = F.cross_entropy(logits, targets, reduction="none")
 
         # 2. Convert CE loss to p_t = Probability assigned to the true class
         #    In standard CE:  ce_loss = -log(p_t)  =>  p_t = exp(-ce_loss)
@@ -1219,11 +1304,13 @@ class AdaptiveLearnableFocalLoss_V2(nn.Module):
 
         # 3. Retrieve alpha, gamma (class-dependent) by indexing with targets
         if self.log_alpha is not None and self.log_gamma is not None:
-        # Exponential reparam => alpha, gamma > 0
+            # Exponential reparam => alpha, gamma > 0
             alpha_vec = torch.exp(self.log_alpha).to(logits.device)
             gamma_vec = torch.exp(self.log_gamma).to(logits.device)
-        
-            alpha_t = alpha_vec[targets]      # Now both alpha_vec and targets are on the same device
+
+            alpha_t = alpha_vec[
+                targets
+            ]  # Now both alpha_vec and targets are on the same device
             gamma_t = gamma_vec[targets]
         else:
             # Non-learnable path
@@ -1232,16 +1319,18 @@ class AdaptiveLearnableFocalLoss_V2(nn.Module):
 
         # 4. Compute focal term: (1 - p_t)^gamma_t
         focal_term = (1.0 - pt) ** gamma_t
-        
+
         # 5. Focal loss (element-wise)
         focal_loss = alpha_t * focal_term * ce_loss
 
         # 6. Mix focal loss and cross-entropy via an adaptive factor in [0,1]
         #    We clamp to ensure stable mixing between the two.
         adaptive_factor_clamped = torch.clamp(self.adaptive_factor, 0.0, 1.0)
-        combined_loss = adaptive_factor_clamped * focal_loss \
-                        + (1.0 - adaptive_factor_clamped) * ce_loss
-        
+        combined_loss = (
+            adaptive_factor_clamped * focal_loss
+            + (1.0 - adaptive_factor_clamped) * ce_loss
+        )
+
         # 7. Return average over the batch
         return combined_loss.mean()
 
@@ -1250,17 +1339,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class CrossEntropyWithContrastiveCenterLoss(nn.Module):
     """
     A combination of cross-entropy loss and contrastive-center loss
     for multi-modal models.
     """
-    def __init__(self,
-                 num_classes: int,
-                 feature_dim: int,
-                 alpha: float = 0.5,
-                 beta: float = 1.0,
-                 class_weights: torch.Tensor = None):
+
+    def __init__(
+        self,
+        num_classes: int,
+        feature_dim: int,
+        alpha: float = 0.5,
+        beta: float = 1.0,
+        class_weights: torch.Tensor = None,
+    ):
         """
         Args:
             num_classes: Number of classes in the dataset.
@@ -1289,12 +1382,12 @@ class CrossEntropyWithContrastiveCenterLoss(nn.Module):
             Scalar loss combining cross-entropy and contrastive-center loss.
         """
         device = self.centers.device  # Ensure everything is on the same device
-    
+
         # Move all inputs to the same device
         logits = logits.to(device)
         combined_features = combined_features.to(device)
         targets = targets.to(device)
-    
+
         # ---- Cross-Entropy Loss ----
         if self.class_weights is not None:
             ce_loss = F.cross_entropy(
@@ -1302,112 +1395,154 @@ class CrossEntropyWithContrastiveCenterLoss(nn.Module):
             )
         else:
             ce_loss = F.cross_entropy(logits, targets)
-    
+
         # ---- Contrastive-Center Loss ----
         batch_size = combined_features.size(0)
-    
+
         # Gather class centers for each target
         centers_batch = self.centers[targets]  # (batch_size, feature_dim)
-    
+
         # Compute the Euclidean distance between features and their class centers
         intra_class_distance = torch.norm(combined_features - centers_batch, p=2, dim=1)
-    
+
         # Contrastive-center loss
         c_loss = intra_class_distance.mean()
-    
+
         # Regularization for centers
         unique_targets = targets.unique()
         reg_loss = torch.norm(self.centers[unique_targets], p=2, dim=1).mean()
         contrastive_center_loss = c_loss + 0.001 * reg_loss
-    
+
         # ---- Combine Losses ----
         total_loss = self.alpha * ce_loss + self.beta * contrastive_center_loss
-    
+
         return total_loss
+
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 class BalancedCrossEntropyWithContrastiveLoss(nn.Module):
     """
     Enhanced loss function that combines cross-entropy, contrastive-center loss,
     and class balancing mechanisms to optimize for UAR and low std deviation.
     """
-    def __init__(self,
-                 num_classes: int,
-                 feature_dim: int,
-                 alpha: float = 0.5,
-                 beta: float = 1.0,
-                 gamma: float = 0.5,  # Weight for class balance loss
-                 class_weights: torch.Tensor = None):
+
+    def __init__(
+        self,
+        num_classes: int,
+        feature_dim: int,
+        alpha: float = 0.5,
+        beta: float = 1.0,
+        gamma: float = 0.5,  # Weight for class balance loss
+        class_weights: torch.Tensor = None,
+    ):
         super(BalancedCrossEntropyWithContrastiveLoss, self).__init__()
         self.num_classes = num_classes
         self.feature_dim = feature_dim
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
+        # self.alpha = alpha
+        # self.beta = beta
+        # self.gamma = gamma
         self.class_weights = class_weights
         self.centers = nn.Parameter(torch.randn(num_classes, feature_dim))
-        
+
+        self.log_var_ce = nn.Parameter(
+            torch.tensor([0.0])
+        )  # CE ~1.4, so log(1.4²) ≈ 0.7
+        self.log_var_contrastive = nn.Parameter(
+            torch.tensor([3.5])
+        )  # Contrastive ~45, so log(45²) ≈ 7.5
+        self.log_var_balance = nn.Parameter(
+            torch.tensor([-1.0])
+        )  # Balance ~0.3, so log(0.3²) ≈ -2.4
+
     def compute_class_accuracies(self, logits, targets):
         """Compute per-class accuracies for the current batch."""
         predictions = torch.argmax(logits, dim=1)
         class_accs = []
-        
+
         for c in range(self.num_classes):
-            class_mask = (targets == c)
+            class_mask = targets == c
             if torch.sum(class_mask) > 0:
-                class_acc = torch.sum((predictions == targets) & class_mask).float() / torch.sum(class_mask)
+                class_acc = torch.sum(
+                    (predictions == targets) & class_mask
+                ).float() / torch.sum(class_mask)
                 class_accs.append(class_acc)
-                
+
         return torch.stack(class_accs)
-    
+
     def forward(self, logits, combined_features, targets):
         device = self.centers.device
         logits = logits.to(device)
         combined_features = combined_features.to(device)
         targets = targets.to(device)
-        
+
         # 1. Enhanced Cross-Entropy Loss with class weights
         if self.class_weights is not None:
-            ce_loss = F.cross_entropy(logits, targets, weight=self.class_weights.to(device))
+            ce_loss = F.cross_entropy(
+                logits, targets, weight=self.class_weights.to(device)
+            )
         else:
             # Use inverse frequency weighting if no weights provided
             class_counts = torch.bincount(targets, minlength=self.num_classes)
             class_weights = (1.0 / (class_counts + 1)).to(device)
             class_weights = class_weights / class_weights.sum() * self.num_classes
             ce_loss = F.cross_entropy(logits, targets, weight=class_weights)
-            
+
         # 2. Enhanced Contrastive-Center Loss
         centers_batch = self.centers[targets]
-        
+
         # Compute intra-class distances
         intra_class_distance = torch.norm(combined_features - centers_batch, p=2, dim=1)
-        
+
         # Compute inter-class distances (push different classes apart)
         center_distances = []
         for c in range(self.num_classes):
-            mask = (targets != c)
+            mask = targets != c
             if torch.sum(mask) > 0:
                 dist = torch.norm(combined_features[mask] - self.centers[c], p=2, dim=1)
                 center_distances.append(torch.mean(torch.exp(-dist)))
-        
+
         inter_class_distance = torch.mean(torch.stack(center_distances))
-        
+
         # Combined contrastive loss that maximizes inter-class distances
-        contrastive_loss = intra_class_distance.mean() + 0.001 * torch.norm(self.centers, p=2).mean() - torch.log(inter_class_distance)
-        
+        contrastive_loss = (
+            intra_class_distance.mean()
+            + 0.001 * torch.norm(self.centers, p=2).mean()
+            - torch.log(inter_class_distance)
+        )
+
         # 3. Class Balance Loss - minimize std deviation of class accuracies
         class_accuracies = self.compute_class_accuracies(logits, targets)
         balance_loss = torch.std(class_accuracies)
-        
-        # Combine all losses
-        total_loss = (self.alpha * ce_loss + 
-                     self.beta * contrastive_loss + 
-                     self.gamma * balance_loss)
-        
-        return total_loss
+        ## homoscedastic uncertainty weighting
+        precision_ce = torch.exp(-self.log_var_ce)
+        precision_contrastive = torch.exp(-self.log_var_contrastive)
+        precision_balance = torch.exp(-self.log_var_balance)
+
+        # Weighted losses with learned coefficients
+        weighted_ce = precision_ce * ce_loss + 0.5 * self.log_var_ce
+        weighted_contrastive = (
+            precision_contrastive * contrastive_loss + 0.5 * self.log_var_contrastive
+        )
+        weighted_balance = precision_balance * balance_loss + 0.5 * self.log_var_balance
+
+        # Total loss
+        total_loss = weighted_ce + weighted_contrastive + weighted_balance
+
+        weight_info = {
+            "log_var_ce": self.log_var_ce.item(),
+            "log_var_contrastive": self.log_var_contrastive.item(),
+            "log_var_balance": self.log_var_balance.item(),
+            "weight_ce": precision_ce.item(),
+            "weight_contrastive": precision_contrastive.item(),
+            "weight_balance": precision_balance.item(),
+        }
+
+        return total_loss, weight_info
+
 
 def get_label_boundaries(dataset, label_column="label"):
     """
@@ -1417,7 +1552,7 @@ def get_label_boundaries(dataset, label_column="label"):
     boundaries = OrderedDict()
     current_label = None
     start_idx = 0
-    
+
     # Because the dataset is sorted, we only record changes in label
     for idx, example in enumerate(dataset):
         label = example[label_column]
@@ -1430,56 +1565,56 @@ def get_label_boundaries(dataset, label_column="label"):
             # update current label
             current_label = label
             start_idx = idx
-    
+
     # The last label boundary
     if current_label is not None:
         boundaries[current_label] = (start_idx, len(dataset))
-    
+
     return boundaries
 
+
 def balance_dataset_by_sort(
-    sorted_dataset,
-    label_boundaries,
-    target_size,
-    label_column="label",
-    seed=42
+    sorted_dataset, label_boundaries, target_size, label_column="label", seed=42
 ):
     random.seed(seed)
     np.random.seed(seed)
-    
+
     balanced_splits = []
-    
+
     for lbl, (start_idx, end_idx) in label_boundaries.items():
         subset_size = end_idx - start_idx
         subset = sorted_dataset.select(range(start_idx, end_idx))
-        
+
         if subset_size < target_size:
             # Oversample
             times_full = target_size // subset_size
             remainder = target_size % subset_size
-            
+
             oversampled_full = concatenate_datasets([subset] * times_full)
-            
+
             if remainder > 0:
                 subset_shuffled = subset.shuffle(seed=seed)
                 oversampled_remainder = subset_shuffled.select(range(remainder))
-                oversampled_full = concatenate_datasets([oversampled_full, oversampled_remainder])
-            
+                oversampled_full = concatenate_datasets(
+                    [oversampled_full, oversampled_remainder]
+                )
+
             balanced_splits.append(oversampled_full)
-        
+
         elif subset_size > target_size:
             # Undersample
             subset_shuffled = subset.shuffle(seed=seed)
             undersampled = subset_shuffled.select(range(target_size))
             balanced_splits.append(undersampled)
-        
+
         else:
             # Exactly target_size
             balanced_splits.append(subset)
-    
+
     # Concatenate everything
     balanced_dataset = concatenate_datasets(balanced_splits)
     return balanced_dataset
+
 
 import numpy as np
 import seaborn as sns
@@ -1487,11 +1622,21 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix
 import os
 
-def plot_and_save_confusion_matrix(all_labels, all_predictions, ordered_labels_str, output_dir, epoch=None, filename = "confusion_matrix.png"):
+
+def plot_and_save_confusion_matrix(
+    all_labels,
+    all_predictions,
+    ordered_labels_str,
+    output_dir,
+    epoch=None,
+    filename="confusion_matrix.png",
+):
 
     # Step 1: Calculate the confusion matrix
     cm = confusion_matrix(y_true=all_labels, y_pred=all_predictions)
-    cm_percentage = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100  # Percentages per class
+    cm_percentage = (
+        cm.astype("float") / cm.sum(axis=1)[:, np.newaxis] * 100
+    )  # Percentages per class
 
     # Step 2: Prepare annotations (raw counts and percentages)
     annotations = np.empty_like(cm, dtype=object)
@@ -1508,7 +1653,7 @@ def plot_and_save_confusion_matrix(all_labels, all_predictions, ordered_labels_s
         cmap="Blues",
         xticklabels=ordered_labels_str,
         yticklabels=ordered_labels_str,
-        cbar_kws={'label': 'Percentage (%)'}
+        cbar_kws={"label": "Percentage (%)"},
     )
     plt.xlabel("Predicted Labels")
     plt.ylabel("True Labels")
@@ -1525,15 +1670,62 @@ def plot_and_save_confusion_matrix(all_labels, all_predictions, ordered_labels_s
     print(f"Confusion matrix saved to: {save_path}")
 
 
+def balance_dataset(dataset, label_column="label", seed=None):
+    """
+    Balances a Hugging Face dataset by undersampling or oversampling each class to the average number of examples.
+
+    Args:
+        dataset: A Hugging Face dataset.
+        label_column (str): The column name to use as the class label. Defaults to "label".
+        seed (int, optional): A random seed for reproducibility.
+
+    Returns:
+        A balanced Hugging Face dataset.
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    # 1. Group indices by class label (using the specified label column)
+    class_to_indices = defaultdict(list)
+    for idx, example in enumerate(dataset):
+        class_label = example[label_column]
+        class_to_indices[class_label].append(idx)
+
+    # 2. Compute the average count across all classes
+    total_examples = sum(len(indices) for indices in class_to_indices.values())
+    num_classes = len(class_to_indices)
+    avg_count = total_examples // num_classes
+
+    # 3. Resample indices for each class to reach the average count:
+    #    - Oversample (with replacement) if below average.
+    #    - Undersample (without replacement) if above average.
+    balanced_indices = []
+    for label, indices in class_to_indices.items():
+        current_count = len(indices)
+        if current_count < avg_count:
+            extra_indices = random.choices(indices, k=(avg_count - current_count))
+            balanced_indices.extend(indices + extra_indices)
+        elif current_count > avg_count:
+            selected_indices = random.sample(indices, avg_count)
+            balanced_indices.extend(selected_indices)
+        else:
+            balanced_indices.extend(indices)
+
+    # Shuffle indices to mix the classes
+    random.shuffle(balanced_indices)
+
+    # 4. Create and return a new balanced dataset using .select
+    balanced_dataset = dataset.select(balanced_indices)
+    return balanced_dataset
 
 
 def create_unique_output_dir(base_output_dir: str) -> str:
     """
     Creates a unique output directory appended with the current date and an incremented identifier.
-    
+
     Args:
         base_output_dir (str): The base directory where the new folder should be created.
-        
+
     Returns:
         str: The path of the newly created unique output directory.
     """
@@ -1545,13 +1737,15 @@ def create_unique_output_dir(base_output_dir: str) -> str:
         os.makedirs(base_output_dir)
 
     existing_dirs = [
-        d for d in os.listdir(base_output_dir)
+        d
+        for d in os.listdir(base_output_dir)
         if os.path.isdir(os.path.join(base_output_dir, d))
     ]
 
     # Filter for directories that start with the current date string
     matching_dirs = [
-        d for d in existing_dirs
+        d
+        for d in existing_dirs
         if d.startswith(date_str) and "_" in d and d.split("_")[-1].isdigit()
     ]
 
@@ -1570,7 +1764,6 @@ def create_unique_output_dir(base_output_dir: str) -> str:
 
     return unique_output_dir
 
+
 # Example usage:
 # matrix_path = save_confusion_matrix(outputs, dataset_train, new_model_path)
-
-
